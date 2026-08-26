@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from azure.cosmos import CosmosClient
@@ -23,6 +24,7 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", "output")
 INGESTION_MODE = os.getenv("INGESTION_MODE", "none").lower()
 BATCH_LIMIT = int(os.getenv("BATCH_LIMIT", "0"))
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "10"))
 
 
 def query(container, field, values):
@@ -268,13 +270,27 @@ def log_failure(interaction_id, error):
     append_csv(path, ["interaction_id", "error"], [(interaction_id, str(error))])
 
 
+def process_batch(database, interaction_ids):
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        future_to_id = {
+            executor.submit(get_interaction, database, interaction_id): interaction_id
+            for interaction_id in interaction_ids
+        }
+        for future in as_completed(future_to_id):
+            interaction_id = future_to_id[future]
+            try:
+                yield interaction_id, future.result(), None
+            except Exception as error:
+                yield interaction_id, None, error
+
+
 if __name__ == "__main__":
     if not ENDPOINT or len(sys.argv) != 2:
         print("Usage: python app.py <chat-id> | --all | --all-complete | --timestamps")
         print("Set COSMOS_ENDPOINT and optionally COSMOS_DATABASE first.")
         raise SystemExit(1)
-    if BATCH_LIMIT < 0 or BATCH_SIZE < 1:
-        raise ValueError("BATCH_LIMIT must be >= 0 and BATCH_SIZE must be > 0")
+    if BATCH_LIMIT < 0 or BATCH_SIZE < 1 or MAX_WORKERS < 1:
+        raise ValueError("BATCH_LIMIT must be >= 0; BATCH_SIZE and MAX_WORKERS must be > 0")
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     credential = DefaultAzureCredential()
@@ -293,6 +309,7 @@ if __name__ == "__main__":
         print_container_timestamps(database)
     batches = get_chat_id_batches(database) if all_mode else [[sys.argv[1]]]
 
+    print(f"Parallel workers: {MAX_WORKERS}")
     success = 0
     skipped = 0
     failed = 0
@@ -300,25 +317,30 @@ if __name__ == "__main__":
         batch_success = 0
         batch_skipped = 0
         missing_counts = {"tool_history": 0, "context_history": 0, "feedback": 0}
-        print(f"Processing batch {batch_number} ({len(interaction_ids)} chats)")
-        for interaction_id in interaction_ids:
-            try:
-                interaction = get_interaction(database, interaction_id)
-                if complete_only and not has_all_containers(interaction):
-                    skipped += 1
-                    batch_skipped += 1
-                    for source in missing_containers(interaction):
-                        if source in missing_counts:
-                            missing_counts[source] += 1
-                    continue
-                save_interaction(interaction)
-                success += 1
-                batch_success += 1
-                print(f"Processed {interaction_id}")
-            except Exception as error:
+        print(f"Processing batch {batch_number} ({len(interaction_ids)} chats, {MAX_WORKERS} workers)")
+
+        for interaction_id, interaction, error in process_batch(database, interaction_ids):
+            if error is not None:
                 failed += 1
                 log_failure(interaction_id, error)
                 print(f"Failed {interaction_id}: {error}")
+                continue
+
+            if complete_only and not has_all_containers(interaction):
+                skipped += 1
+                batch_skipped += 1
+                for source in missing_containers(interaction):
+                    if source in missing_counts:
+                        missing_counts[source] += 1
+                continue
+
+            # Writes stay on the main thread so concurrent workers never write
+            # to the same CSV/JSONL files at the same time.
+            save_interaction(interaction)
+            success += 1
+            batch_success += 1
+            print(f"Processed {interaction_id}")
+
         if complete_only:
             missing = ", ".join(f"missing_{name}={count}" for name, count in missing_counts.items())
             print(f"Batch {batch_number}: complete={batch_success}, skipped={batch_skipped}, {missing}")
