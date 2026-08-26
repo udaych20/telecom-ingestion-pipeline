@@ -171,9 +171,9 @@ def get_interaction(database, cid):
     if not chats:
         raise ValueError(f"Chat not found for cid: {cid}")
 
-    tool_history = query(tools, "cid", [cid])
-    run_ids = find_values(tool_history, "run_id")
-    context_history = query(context, "run_id", run_ids) if run_ids else []
+    context_history = query(context, "run_id", [cid])
+    run_ids = find_values(context_history, "run_id")
+    tool_history = query(tools, "run_id", run_ids) if run_ids else []
 
     feedback = query_feedback(feedback_container, [cid])
 
@@ -206,15 +206,21 @@ def save_interaction(interaction):
 def get_chat_id_batches(database):
     chat = database.get_container_client(CHAT_CONTAINER)
     sql = """
-        SELECT DISTINCT VALUE message.data.cid
+        SELECT message.data.cid AS cid, c._ts AS ts
         FROM c
         JOIN message IN c.messages
         WHERE IS_DEFINED(message.data.cid)
+        ORDER BY c._ts DESC
     """
-    ids = chat.query_items(sql, enable_cross_partition_query=True)
+    rows = chat.query_items(sql, enable_cross_partition_query=True)
     batch = []
     count = 0
-    for interaction_id in ids:
+    seen = set()
+    for row in rows:
+        interaction_id = row.get("cid")
+        if not interaction_id or interaction_id in seen:
+            continue
+        seen.add(interaction_id)
         if BATCH_LIMIT and count >= BATCH_LIMIT:
             break
         batch.append(interaction_id)
@@ -224,6 +230,27 @@ def get_chat_id_batches(database):
             batch = []
     if batch:
         yield batch
+
+
+def cosmos_ts_to_iso(value):
+    if value is None:
+        return "unknown"
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+def print_container_timestamps(database):
+    print("Cosmos container latest timestamps (UTC):")
+    for name in (CHAT_CONTAINER, TOOLS_CONTAINER, CONTEXT_CONTAINER, FEEDBACK_CONTAINER):
+        container = database.get_container_client(name)
+        rows = list(container.query_items(
+            "SELECT TOP 1 c.id, c._ts FROM c ORDER BY c._ts DESC",
+            enable_cross_partition_query=True,
+        ))
+        if rows:
+            row = rows[0]
+            print(f"  {name}: {cosmos_ts_to_iso(row.get('_ts'))} (id={row.get('id', '')})")
+        else:
+            print(f"  {name}: EMPTY")
 
 
 def has_all_containers(interaction):
@@ -243,7 +270,7 @@ def log_failure(interaction_id, error):
 
 if __name__ == "__main__":
     if not ENDPOINT or len(sys.argv) != 2:
-        print("Usage: python app.py <chat-id> | --all | --all-complete")
+        print("Usage: python app.py <chat-id> | --all | --all-complete | --timestamps")
         print("Set COSMOS_ENDPOINT and optionally COSMOS_DATABASE first.")
         raise SystemExit(1)
     if BATCH_LIMIT < 0 or BATCH_SIZE < 1:
@@ -254,8 +281,16 @@ if __name__ == "__main__":
     client = CosmosClient(ENDPOINT, credential=credential)
     database = client.get_database_client(DATABASE)
 
+    if sys.argv[1] == "--timestamps":
+        print_container_timestamps(database)
+        client.close()
+        credential.close()
+        raise SystemExit(0)
+
     all_mode = sys.argv[1] in ("--all", "--all-complete")
     complete_only = sys.argv[1] == "--all-complete"
+    if all_mode:
+        print_container_timestamps(database)
     batches = get_chat_id_batches(database) if all_mode else [[sys.argv[1]]]
 
     success = 0
