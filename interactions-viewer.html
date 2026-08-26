@@ -115,6 +115,7 @@
     if(row.parsed) {
       if(row.source==='chat_history' && Array.isArray(row.parsed.messages)) body=renderChatMessages(row.parsed.messages);
       else if(row.source==='context_history') body=renderContextHistory(row.parsed);
+      else if(row.source==='tool_history') body=renderToolHistory(row.parsed);
       else { const fields=meaningfulFields(row.parsed); body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>'; }
     } else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;
     return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(row.parsed?JSON.stringify(row.parsed,null,2):row.data)}</pre></details></article>`;
@@ -137,9 +138,21 @@
       ['Function arguments', record.function_arguments],
       ['Function result', record.function_result]
     ].filter(([,value])=>isUseful(value));
+    return renderFields(fields, 'No agent/function summary fields found. Expand the complete JSON below.');
+  }
+  function renderToolHistory(record) {
+    const fields = [
+      ['Function name', record.function_name],
+      ['Arguments', record.arguments],
+      ['Function result', record.function_result],
+      ['Error', record.error]
+    ].filter(([,value])=>isUseful(value));
+    return renderFields(fields, 'No tool summary fields found. Expand the complete JSON below.');
+  }
+  function renderFields(fields, emptyMessage) {
     return fields.length
       ? fields.map(([name,value])=>`<div class="field"><div class="field-name">${esc(name)}</div><div class="value">${highlight(display(value))}</div></div>`).join('')
-      : '<span class="hint">No agent/function summary fields found. Expand the complete JSON below.</span>';
+      : `<span class="hint">${esc(emptyMessage)}</span>`;
   }
   function meaningfulFields(value) {
     const found=new Map(); walk(value,'',found); const ranked=[...found].sort((a,b)=>{ const ai=preferred.indexOf(a[0].split('.').pop()),bi=preferred.indexOf(b[0].split('.').pop()); return (ai<0?999:ai)-(bi<0?999:bi); }); return ranked.slice(0,14);
