@@ -40,6 +40,8 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 | FR-09 | Use keyless auth | Authentication is performed by `DefaultAzureCredential` |
 | FR-10 | Process a complete dataset | `python app.py --all` processes all chat IDs and records per-ID failures |
 | FR-11 | Limit a trial batch | A positive `BATCH_LIMIT` processes at most that many enumerated chat IDs |
+| FR-12 | Export complete joins only | `--all-complete` exports only interactions with records from all four sources |
+| FR-13 | Process in batches | Dataset IDs are handled in groups of `BATCH_SIZE` rather than loaded together |
 
 ## Non-functional requirements
 
@@ -49,6 +51,7 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 - Repeated context results must be de-duplicated.
 - Container names and output mode must be configurable through environment variables.
 - A failed interaction in dataset mode must not stop later interactions.
+- An incomplete interaction in complete-only mode must be skipped without being logged as a failure.
 
 ## Acceptance scenario
 

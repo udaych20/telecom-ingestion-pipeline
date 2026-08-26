@@ -21,6 +21,8 @@ python -m py_compile app.py
 - Graph export creates the expected nodes and edges.
 - Invalid ingestion mode fails clearly.
 - `BATCH_LIMIT=0`, a positive limit, and single-ID behavior.
+- Batch boundaries for fewer than, exactly, and more than `BATCH_SIZE` IDs.
+- Complete-only mode exports all four sources and skips every incomplete combination.
 - Batch processing continues after one interaction fails.
 
 ### Integration cases

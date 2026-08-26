@@ -40,6 +40,8 @@ python app.py "5638529c-2db7-45fe-8c2f-5dcfd46778c8"
 
 For a trial dataset run, set `BATCH_LIMIT=10` in `.env` and run `python app.py --all`. Set `BATCH_LIMIT=0` only when ready to process every chat.
 
+To export only fully joined interactions, run `python app.py --all-complete`. It writes an interaction only when chat, all-tools context, UAT context, and feedback are all present. Incomplete interactions are skipped.
+
 The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
 ## Current limitation

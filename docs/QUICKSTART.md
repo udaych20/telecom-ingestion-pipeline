@@ -37,3 +37,11 @@ python app.py --all
 ```
 
 After checking the output, set `BATCH_LIMIT=0` to process every chat. Failures are recorded in `output/failed_interactions.csv` without stopping the batch.
+
+To keep only records with matches in all four containers:
+
+```powershell
+python app.py --all-complete
+```
+
+Incomplete interactions are skipped and are not written to output or the failure CSV.

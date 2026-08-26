@@ -6,7 +6,7 @@ The pipeline gathers records belonging to one customer interaction from multiple
 
 ## Inputs and outputs
 
-Input: either one chat-history document `id`, or `--all` to enumerate chat IDs from the chat container. `BATCH_LIMIT` optionally restricts dataset mode.
+Input: one chat-history document `id`, `--all` for every interaction, or `--all-complete` for only four-source interactions. Dataset IDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
 
 Outputs:
 
@@ -34,4 +34,4 @@ The chat `cid` is the primary correlation value. Both context containers are que
 
 ## Scope
 
-The current version is a command-line reader supporting single-interaction and complete-dataset runs. Dataset mode still performs correlation queries per interaction. Scheduling, change-feed processing, direct model fine-tuning, and direct graph-database writes are outside the current scope.
+The current version is a command-line reader supporting single-interaction, complete-dataset, and complete-join-only runs. Dataset mode still performs correlation queries per interaction. Scheduling, change-feed processing, direct model fine-tuning, and direct graph-database writes are outside the current scope.

@@ -16,12 +16,15 @@
 - Complete CSV/JSONL logging.
 - Mode-specific LLM or graph export.
 - Single-ID or dataset orchestration with per-ID failure logging.
+- Complete-only filtering after all four source queries finish.
 
 `DefaultAzureCredential` chooses the available identity source. Locally this is normally Azure CLI; in Azure it should be managed identity or workload identity.
 
 ## Query design
 
-The pipeline performs cross-partition parameterized queries because partition keys were not provided. Each chat CID is queried as `run_id` in both context containers and as `cid` in feedback. Dataset mode reuses one Cosmos client and database connection, but still performs queries per interaction. This is suitable for validation; high-volume production ingestion should use known partition keys, batching, or the Cosmos change feed.
+The pipeline performs cross-partition parameterized queries because partition keys were not provided. Each chat CID is queried as `run_id` in both context containers and as `cid` in feedback. Dataset mode reuses one Cosmos client and streams IDs in bounded in-memory batches, but still performs queries per interaction. This is suitable for validation; high-volume production ingestion should use known partition keys, bulk concurrency, or the Cosmos change feed.
+
+Complete-only filtering happens after correlation. An interaction is saved only when all four assembled lists are non-empty. A missing source is a normal skip; query or export exceptions remain failures.
 
 ## Failure behavior
 

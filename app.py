@@ -22,6 +22,7 @@ FEEDBACK_CONTAINER = os.getenv("COSMOS_FEEDBACK_CONTAINER", "chat-feedback")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "output")
 INGESTION_MODE = os.getenv("INGESTION_MODE", "none").lower()
 BATCH_LIMIT = int(os.getenv("BATCH_LIMIT", "0"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))
 
 
 def query(container, field, values):
@@ -177,11 +178,27 @@ def save_interaction(interaction):
         raise ValueError("INGESTION_MODE must be none, llm, or knowledge_graph")
 
 
-def get_all_chat_ids(database):
+def get_chat_id_batches(database):
     chat = database.get_container_client(CHAT_CONTAINER)
     sql = "SELECT VALUE c.id FROM c WHERE IS_DEFINED(c.id)"
     ids = chat.query_items(sql, enable_cross_partition_query=True)
-    return list(ids)[:BATCH_LIMIT or None]
+    batch = []
+    count = 0
+    for interaction_id in ids:
+        if BATCH_LIMIT and count >= BATCH_LIMIT:
+            break
+        batch.append(interaction_id)
+        count += 1
+        if len(batch) == BATCH_SIZE:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+def has_all_containers(interaction):
+    sources = ("chat_history", "tool_history", "context_history", "feedback")
+    return all(interaction[source] for source in sources)
 
 
 def log_failure(interaction_id, error):
@@ -191,27 +208,40 @@ def log_failure(interaction_id, error):
 
 if __name__ == "__main__":
     if not ENDPOINT or len(sys.argv) != 2:
-        print("Usage: python app.py <chat-id> | --all")
+        print("Usage: python app.py <chat-id> | --all | --all-complete")
         print("Set COSMOS_ENDPOINT and optionally COSMOS_DATABASE first.")
         raise SystemExit(1)
+    if BATCH_LIMIT < 0 or BATCH_SIZE < 1:
+        raise ValueError("BATCH_LIMIT must be >= 0 and BATCH_SIZE must be > 0")
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     credential = DefaultAzureCredential()
     client = CosmosClient(ENDPOINT, credential=credential)
     database = client.get_database_client(DATABASE)
 
-    interaction_ids = get_all_chat_ids(database) if sys.argv[1] == "--all" else [sys.argv[1]]
+    all_mode = sys.argv[1] in ("--all", "--all-complete")
+    complete_only = sys.argv[1] == "--all-complete"
+    batches = get_chat_id_batches(database) if all_mode else [[sys.argv[1]]]
+
     success = 0
-    for interaction_id in interaction_ids:
-        try:
-            interaction = get_interaction(database, interaction_id)
-            save_interaction(interaction)
-            success += 1
-            print(f"Processed {interaction_id}")
-        except Exception as error:
-            log_failure(interaction_id, error)
-            print(f"Failed {interaction_id}: {error}")
+    skipped = 0
+    failed = 0
+    for batch_number, interaction_ids in enumerate(batches, start=1):
+        print(f"Processing batch {batch_number} ({len(interaction_ids)} chats)")
+        for interaction_id in interaction_ids:
+            try:
+                interaction = get_interaction(database, interaction_id)
+                if complete_only and not has_all_containers(interaction):
+                    skipped += 1
+                    continue
+                save_interaction(interaction)
+                success += 1
+                print(f"Processed {interaction_id}")
+            except Exception as error:
+                failed += 1
+                log_failure(interaction_id, error)
+                print(f"Failed {interaction_id}: {error}")
 
     client.close()
     credential.close()
-    print(f"Completed: {success} succeeded, {len(interaction_ids) - success} failed")
+    print(f"Completed: {success} succeeded, {skipped} skipped, {failed} failed")

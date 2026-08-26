@@ -6,6 +6,8 @@ For targeted validation, run one chat ID at a time. The script prints progress a
 
 For dataset validation, run `python app.py --all`. Use a small `BATCH_LIMIT` first because cross-partition queries consume Cosmos request units. Set it to `0` only when ready for the complete dataset.
 
+Use `python app.py --all-complete` when downstream data must contain all four sources. Skipped records mean at least one source had no matching record; they are counted but intentionally not written.
+
 ## Common failures
 
 | Symptom | Likely cause | Action |

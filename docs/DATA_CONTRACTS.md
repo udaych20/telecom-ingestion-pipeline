@@ -61,3 +61,7 @@ The CSVs are neutral interchange files; target-specific import headers or comman
 ## Failure CSV
 
 `failed_interactions.csv` contains `interaction_id` and `error`. It is append-only and may contain repeated failures across reruns.
+
+## Complete-interaction rule
+
+For `--all-complete`, `chat_history`, `tool_history`, `context_history`, and `feedback` must each contain at least one record. The rule checks presence, not semantic quality or record counts.

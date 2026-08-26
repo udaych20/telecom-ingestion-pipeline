@@ -25,6 +25,7 @@ output/              Generated files; ignored by Git
 - Do not silently broaden correlation joins.
 - Preserve source JSON in the complete log.
 - Preserve per-interaction fault isolation in dataset mode.
+- Keep incomplete-record skips separate from genuine processing failures.
 - Avoid new dependencies unless they clearly reduce complexity.
 
 ## Definition of done
