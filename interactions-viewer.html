@@ -36,6 +36,12 @@
     .field { display:grid; grid-template-columns:minmax(110px,180px) minmax(0,1fr); gap:12px; }
     .field-name { color:var(--muted); font-weight:650; overflow-wrap:anywhere; }
     .value { white-space:pre-wrap; overflow-wrap:anywhere; }
+    .chat-thread { display:grid; gap:12px; }
+    .chat-message { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:#fff; }
+    .chat-message.assistant { background:#f7fafb; }
+    .chat-role { display:inline-block; margin-bottom:7px; border-radius:999px; padding:3px 8px; font-size:11px; font-weight:750; letter-spacing:.04em; background:#e9f7fa; color:var(--brand); }
+    .chat-message.assistant .chat-role { background:#eef3f5; color:#39434d; }
+    .chat-content { white-space:pre-wrap; overflow-wrap:anywhere; }
     details { border-top:1px solid var(--line); } summary { cursor:pointer; padding:10px 13px; color:var(--brand); font-weight:650; }
     pre { margin:0; padding:14px; background:#102027; color:#d7edf2; overflow:auto; max-height:520px; font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace; }
     .error { color:var(--bad); padding:12px max(24px,calc((100vw - 1440px)/2)); background:#feeceb; display:none; }
@@ -105,9 +111,23 @@
   }
   function renderRecord(row) {
     const id=row.record_id||row.parsed?.id||'Record'; const meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);
-    let body=''; if(row.parsed) { const fields=meaningfulFields(row.parsed); body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>'; }
-    else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;
+    let body='';
+    if(row.parsed) {
+      if(row.source==='chat_history' && Array.isArray(row.parsed.messages)) body=renderChatMessages(row.parsed.messages);
+      else { const fields=meaningfulFields(row.parsed); body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>'; }
+    } else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;
     return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(row.parsed?JSON.stringify(row.parsed,null,2):row.data)}</pre></details></article>`;
+  }
+  function renderChatMessages(messages) {
+    const items=messages.map((message,index)=>{
+      const role=String(message?.type||message?.data?.type||'message').toLowerCase();
+      const content=message?.data?.content ?? message?.content ?? '';
+      if(content==='' || content===null || content===undefined) return '';
+      const roleLabel=role==='user'?'USER':role==='assistant'?'ASSISTANT':role.toUpperCase();
+      const roleClass=role==='assistant'?' assistant':'';
+      return `<div class="chat-message${roleClass}"><span class="chat-role">${esc(roleLabel)}</span><div class="chat-content">${highlight(display(content))}</div></div>`;
+    }).filter(Boolean);
+    return items.length?`<div class="chat-thread">${items.join('')}</div>`:'<span class="hint">No chat message content found. Expand the complete JSON below.</span>';
   }
   function meaningfulFields(value) {
     const found=new Map(); walk(value,'',found); const ranked=[...found].sort((a,b)=>{ const ai=preferred.indexOf(a[0].split('.').pop()),bi=preferred.indexOf(b[0].split('.').pop()); return (ai<0?999:ai)-(bi<0?999:bi); }); return ranked.slice(0,14);
