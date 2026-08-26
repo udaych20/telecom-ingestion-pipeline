@@ -6,7 +6,7 @@ The pipeline gathers records belonging to one customer interaction from multiple
 
 ## Inputs and outputs
 
-Input: one message CID, `--all` for every distinct `chat_history.messages[].cid`, or `--all-complete` for only four-source interactions. Dataset CIDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
+Input: one message CID, `--all` for every distinct `chat_history.messages[].data.cid`, or `--all-complete` for only four-source interactions. Dataset CIDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
 
 Outputs:
 
@@ -22,7 +22,7 @@ Outputs:
 ## Container relationship
 
 ```text
-chat-history-uat.messages[].cid --> chat-feedback.feedbacks[].cid_list
+chat-history-uat.messages[].data.cid --> chat-feedback.feedbacks[].cid_list
         |
         | referenced by run_id
         +----------------> context-history-all-tools.run_id

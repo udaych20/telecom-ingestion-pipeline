@@ -4,7 +4,7 @@ A small Python pipeline that reconstructs a complete NORA user interaction from 
 
 ## What it does
 
-1. Reads CIDs from `chat_history.messages[].cid`.
+1. Reads CIDs from `chat_history.messages[].data.cid`.
 2. Uses each message CID as the interaction correlation key.
 3. Reads both context containers where `run_id` references the chat `cid`.
 4. Preserves the matching run IDs with the interaction.

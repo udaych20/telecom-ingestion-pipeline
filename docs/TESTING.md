@@ -32,7 +32,7 @@ Use a non-production Cosmos database containing known linked fixtures:
 
 - Valid interaction with one CID and one run.
 - Interaction with multiple CIDs and runs.
-- Missing `messages[].cid`.
+- Missing `messages[].data.cid`.
 - Multiple messages sharing a CID and multiple CIDs in one chat document.
 - Chat without CID.
 - Context returned by both CID and run ID.

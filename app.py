@@ -56,7 +56,7 @@ def query_chat(container, cid):
         WHERE EXISTS (
             SELECT VALUE message
             FROM message IN c.messages
-            WHERE message.cid = @cid
+            WHERE message.data.cid = @cid
         )
     """
     params = [{"name": "@cid", "value": cid}]
@@ -206,10 +206,10 @@ def save_interaction(interaction):
 def get_chat_id_batches(database):
     chat = database.get_container_client(CHAT_CONTAINER)
     sql = """
-        SELECT DISTINCT VALUE message.cid
+        SELECT DISTINCT VALUE message.data.cid
         FROM c
         JOIN message IN c.messages
-        WHERE IS_DEFINED(message.cid)
+        WHERE IS_DEFINED(message.data.cid)
     """
     ids = chat.query_items(sql, enable_cross_partition_query=True)
     batch = []

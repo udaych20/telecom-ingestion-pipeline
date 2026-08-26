@@ -22,7 +22,7 @@
 
 ## Query design
 
-The pipeline performs cross-partition parameterized queries because partition keys were not provided. Chat CIDs are enumerated and matched through `messages[].cid`. Each message CID is queried as `run_id` in both context containers. Feedback uses an `EXISTS` subquery with `ARRAY_CONTAINS` against `feedbacks[].cid_list`. Dataset mode reuses one Cosmos client and streams IDs in bounded in-memory batches, but still performs queries per interaction. This is suitable for validation; high-volume production ingestion should use known partition keys, bulk concurrency, or the Cosmos change feed.
+The pipeline performs cross-partition parameterized queries because partition keys were not provided. Chat CIDs are enumerated and matched through `messages[].data.cid`. Each message CID is queried as `run_id` in both context containers. Feedback uses an `EXISTS` subquery with `ARRAY_CONTAINS` against `feedbacks[].cid_list`. Dataset mode reuses one Cosmos client and streams IDs in bounded in-memory batches, but still performs queries per interaction. This is suitable for validation; high-volume production ingestion should use known partition keys, bulk concurrency, or the Cosmos change feed.
 
 Complete-only filtering happens after correlation. An interaction is saved only when all four assembled lists are non-empty. A missing source is a normal skip; query or export exceptions remain failures.
 

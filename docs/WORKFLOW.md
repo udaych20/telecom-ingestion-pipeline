@@ -7,7 +7,7 @@ Load .env
    |
 Authenticate with DefaultAzureCredential
    |
-Read chat where messages[].cid matches
+Read chat where messages[].data.cid matches
    |
 Discover cid values
    |

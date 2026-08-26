@@ -4,7 +4,7 @@
 
 | Container | Required link | Observed content |
 |---|---|---|
-| Chat history | `messages[].cid` | User content, assistant response, conversation details |
+| Chat history | `messages[].data.cid` | User content, assistant response, conversation details |
 | Context history — all tools | `run_id` references chat `cid` | Function name, arguments, result, error |
 | Context history — UAT | `run_id` references chat `cid` | Agent/tool execution context |
 | Chat feedback | `feedbacks[].cid_list` contains chat `cid` | User feedback and review details |

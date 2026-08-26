@@ -10,7 +10,7 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 
 ## Goals
 
-- Retrieve one interaction from `chat_history.messages[].cid`, or process every distinct message CID.
+- Retrieve one interaction from `chat_history.messages[].data.cid`, or process every distinct message CID.
 - Authenticate through Microsoft Entra ID using `DefaultAzureCredential`.
 - Preserve original JSON documents.
 - Produce a CSV that is easy to inspect.
@@ -30,7 +30,7 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 | ID | Requirement | Acceptance criterion |
 |---|---|---|
 | FR-01 | Accept a message CID | `python app.py <cid>` starts the lookup |
-| FR-02 | Read chat records | Chat documents containing `messages[].cid` are returned or a clear error is raised |
+| FR-02 | Read chat records | Chat documents containing `messages[].data.cid` are returned or a clear error is raised |
 | FR-03 | Correlate by `cid` | Distinct CIDs are enumerated from the nested messages array |
 | FR-04 | Correlate contexts | Both context containers are queried where `run_id` references a chat CID |
 | FR-05 | Read feedback | Feedback is queried where `feedbacks[].cid_list` contains the chat CID |
