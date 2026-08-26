@@ -33,7 +33,7 @@ Edit `.env` and replace the endpoint, database, and container values.
 
 ```powershell
 python -m py_compile app.py
-python app.py "KNOWN-CHAT-ID"
+python app.py "KNOWN-CHAT-CID"
 ```
 
 Verify that output files are created and that their correlation IDs match the source records.

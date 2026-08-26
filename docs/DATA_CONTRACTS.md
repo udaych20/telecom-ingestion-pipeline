@@ -4,20 +4,20 @@
 
 | Container | Required link | Observed content |
 |---|---|---|
-| Chat history | `id`, preferably `cid` | User content, assistant response, conversation details |
+| Chat history | `messages[].cid` | User content, assistant response, conversation details |
 | Context history — all tools | `run_id` references chat `cid` | Function name, arguments, result, error |
 | Context history — UAT | `run_id` references chat `cid` | Agent/tool execution context |
-| Chat feedback | Assumed `cid` | User feedback and review details |
+| Chat feedback | `feedbacks[].cid_list` contains chat `cid` | User feedback and review details |
 
 Fields may be nested. The script recursively searches for `cid`, `run_id`, and supported text fields.
 
-The chat `cid` is used as the lookup value for `run_id` in both context containers. Feedback uses the same value in its `cid` field. Context records are de-duplicated by document `id`.
+The message `cid` is used as the lookup value for `run_id` in both context containers. Feedback documents match through the nested `feedbacks` array when a feedback item's `cid_list` contains that CID. Results are de-duplicated by document `id`.
 
 ## Complete interaction object
 
 ```json
 {
-  "interaction_id": "chat-id",
+  "interaction_id": "chat-cid",
   "retrieved_at": "UTC timestamp",
   "cids": ["conversation-id"],
   "run_ids": ["run-id"],
@@ -34,7 +34,7 @@ One row represents one source document.
 
 | Column | Meaning |
 |---|---|
-| `interaction_id` | Starting chat ID |
+| `interaction_id` | Starting chat CID |
 | `cid` | Record CID, or discovered interaction CIDs |
 | `run_id` | Record run ID when present |
 | `source` | Source collection in the assembled interaction |

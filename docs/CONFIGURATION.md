@@ -17,4 +17,4 @@ Configuration is loaded from process environment variables and an optional `.env
 
 Do not place client secrets, access tokens, or Cosmos account keys in `.env`. `DefaultAzureCredential` provides authentication.
 
-`BATCH_LIMIT` and `BATCH_SIZE` affect `--all` and `--all-complete`, not a single chat ID. `BATCH_LIMIT` must be non-negative and `BATCH_SIZE` must be greater than zero. Environment settings are loaded once when the process starts.
+`BATCH_LIMIT` and `BATCH_SIZE` affect `--all` and `--all-complete`, not a single chat CID. `BATCH_LIMIT` must be non-negative and `BATCH_SIZE` must be greater than zero. Environment settings are loaded once when the process starts.

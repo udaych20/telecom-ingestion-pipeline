@@ -34,6 +34,35 @@ def query(container, field, values):
     return list(records)
 
 
+def query_feedback(container, cids):
+    records = []
+    sql = """
+        SELECT * FROM c
+        WHERE EXISTS (
+            SELECT VALUE feedback
+            FROM feedback IN c.feedbacks
+            WHERE ARRAY_CONTAINS(feedback.cid_list, @cid)
+        )
+    """
+    for cid in cids:
+        params = [{"name": "@cid", "value": cid}]
+        records.extend(container.query_items(sql, parameters=params, enable_cross_partition_query=True))
+    return remove_duplicates(records)
+
+
+def query_chat(container, cid):
+    sql = """
+        SELECT * FROM c
+        WHERE EXISTS (
+            SELECT VALUE message
+            FROM message IN c.messages
+            WHERE message.cid = @cid
+        )
+    """
+    params = [{"name": "@cid", "value": cid}]
+    return list(container.query_items(sql, parameters=params, enable_cross_partition_query=True))
+
+
 def find_values(data, field):
     values = []
     if isinstance(data, dict):
@@ -132,30 +161,26 @@ def append_csv(path, headers, rows):
         writer.writerows(rows)
 
 
-def get_interaction(database, interaction_id):
+def get_interaction(database, cid):
     chat = database.get_container_client(CHAT_CONTAINER)
     tools = database.get_container_client(TOOLS_CONTAINER)
     context = database.get_container_client(CONTEXT_CONTAINER)
     feedback_container = database.get_container_client(FEEDBACK_CONTAINER)
 
-    chats = query(chat, "id", [interaction_id])
+    chats = query_chat(chat, cid)
     if not chats:
-        raise ValueError(f"Chat not found: {interaction_id}")
+        raise ValueError(f"Chat not found for cid: {cid}")
 
-    cids = find_values(chats, "cid")
-    if not cids:
-        raise ValueError(f"No cid found in chat: {interaction_id}")
-
-    tool_history = query(tools, "run_id", cids)
-    context_history = query(context, "run_id", cids)
+    tool_history = query(tools, "run_id", [cid])
+    context_history = query(context, "run_id", [cid])
     run_ids = find_values(tool_history + context_history, "run_id")
 
-    feedback = query(feedback_container, "cid", cids)
+    feedback = query_feedback(feedback_container, [cid])
 
     return {
-        "interaction_id": interaction_id,
+        "interaction_id": cid,
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
-        "cids": cids,
+        "cids": [cid],
         "run_ids": run_ids,
         "chat_history": chats,
         "tool_history": remove_duplicates(tool_history),
@@ -180,7 +205,12 @@ def save_interaction(interaction):
 
 def get_chat_id_batches(database):
     chat = database.get_container_client(CHAT_CONTAINER)
-    sql = "SELECT VALUE c.id FROM c WHERE IS_DEFINED(c.id)"
+    sql = """
+        SELECT DISTINCT VALUE message.cid
+        FROM c
+        JOIN message IN c.messages
+        WHERE IS_DEFINED(message.cid)
+    """
     ids = chat.query_items(sql, enable_cross_partition_query=True)
     batch = []
     count = 0
@@ -199,6 +229,11 @@ def get_chat_id_batches(database):
 def has_all_containers(interaction):
     sources = ("chat_history", "tool_history", "context_history", "feedback")
     return all(interaction[source] for source in sources)
+
+
+def missing_containers(interaction):
+    sources = ("chat_history", "tool_history", "context_history", "feedback")
+    return [source for source in sources if not interaction[source]]
 
 
 def log_failure(interaction_id, error):
@@ -227,20 +262,31 @@ if __name__ == "__main__":
     skipped = 0
     failed = 0
     for batch_number, interaction_ids in enumerate(batches, start=1):
+        batch_success = 0
+        batch_skipped = 0
+        missing_counts = {"tool_history": 0, "context_history": 0, "feedback": 0}
         print(f"Processing batch {batch_number} ({len(interaction_ids)} chats)")
         for interaction_id in interaction_ids:
             try:
                 interaction = get_interaction(database, interaction_id)
                 if complete_only and not has_all_containers(interaction):
                     skipped += 1
+                    batch_skipped += 1
+                    for source in missing_containers(interaction):
+                        if source in missing_counts:
+                            missing_counts[source] += 1
                     continue
                 save_interaction(interaction)
                 success += 1
+                batch_success += 1
                 print(f"Processed {interaction_id}")
             except Exception as error:
                 failed += 1
                 log_failure(interaction_id, error)
                 print(f"Failed {interaction_id}: {error}")
+        if complete_only:
+            missing = ", ".join(f"{name}={count}" for name, count in missing_counts.items())
+            print(f"Batch {batch_number}: complete={batch_success}, skipped={batch_skipped}, {missing}")
 
     client.close()
     credential.close()

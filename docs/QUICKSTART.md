@@ -19,7 +19,7 @@ INGESTION_MODE=none
 Run:
 
 ```powershell
-python app.py "5638529c-2db7-45fe-8c2f-5dcfd46778c8"
+python app.py "CHAT-CID"
 ```
 
 Check `output/interactions.csv` for readable records and `output/interactions.jsonl` for the complete assembled interaction.

@@ -2,7 +2,7 @@
 
 ## Normal operation
 
-For targeted validation, run one chat ID at a time. The script prints progress and appends output files under `OUTPUT_DIR`.
+For targeted validation, run one chat CID at a time. The script prints progress and appends output files under `OUTPUT_DIR`.
 
 For dataset validation, run `python app.py --all`. Use a small `BATCH_LIMIT` first because cross-partition queries consume Cosmos request units. Set it to `0` only when ready for the complete dataset.
 
@@ -16,7 +16,7 @@ Use `python app.py --all-complete` when downstream data must contain all four so
 | HTTP 403 | Missing Cosmos data-plane role | Assign Cosmos DB Built-in Data Reader |
 | Chat not found | Wrong ID, database, container, or environment | Verify `.env` and query the source container |
 | Empty tool/context output | Missing or differently named correlation field | Inspect representative source JSON |
-| Empty feedback | Feedback does not use `cid` | Confirm and implement its actual link field |
+| Empty feedback | CID is absent from `feedbacks[].cid_list` or schema differs | Inspect the nested feedback array |
 | Duplicate output | Append-only rerun | Remove/archive output or add downstream deduplication |
 | Entries in failure CSV | Per-interaction query or export error | Review the error, correct the cause, and rerun the affected ID |
 | Batch stops before processing IDs | Connection or chat-ID enumeration failed | Check credentials, endpoint, role, and network access |

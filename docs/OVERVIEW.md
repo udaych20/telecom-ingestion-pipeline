@@ -6,7 +6,7 @@ The pipeline gathers records belonging to one customer interaction from multiple
 
 ## Inputs and outputs
 
-Input: one chat-history document `id`, `--all` for every interaction, or `--all-complete` for only four-source interactions. Dataset IDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
+Input: one message CID, `--all` for every distinct `chat_history.messages[].cid`, or `--all-complete` for only four-source interactions. Dataset CIDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
 
 Outputs:
 
@@ -22,7 +22,7 @@ Outputs:
 ## Container relationship
 
 ```text
-chat-history-uat.cid ---------------------> chat-feedback.cid
+chat-history-uat.messages[].cid --> chat-feedback.feedbacks[].cid_list
         |
         | referenced by run_id
         +----------------> context-history-all-tools.run_id
@@ -30,7 +30,7 @@ chat-history-uat.cid ---------------------> chat-feedback.cid
         `----------------> context-history-uat.run_id
 ```
 
-The chat `cid` is the primary correlation value. Both context containers are queried with `run_id = cid`, while feedback is queried with `cid = cid`. Duplicate documents are removed by document `id`.
+The message `cid` is the primary correlation value. Both context containers are queried with `run_id = cid`. Feedback matches when its nested `feedbacks[].cid_list` contains the message CID. Duplicate documents are removed by document `id`.
 
 ## Scope
 

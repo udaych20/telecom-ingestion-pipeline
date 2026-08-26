@@ -13,7 +13,8 @@ python -m py_compile app.py
 - Recursive `cid` extraction from dictionaries and lists.
 - Multiple and duplicate `run_id` values.
 - Both context containers queried with `run_id = chat cid`.
-- Feedback queried with `cid = chat cid`.
+- Feedback queried through nested `feedbacks[].cid_list`.
+- Multiple feedback items and multiple CIDs in one `cid_list`.
 - Missing chat CID produces a recorded interaction failure.
 - Context de-duplication by document ID.
 - CSV header creation and row appending.
@@ -31,7 +32,8 @@ Use a non-production Cosmos database containing known linked fixtures:
 
 - Valid interaction with one CID and one run.
 - Interaction with multiple CIDs and runs.
-- Missing chat ID.
+- Missing `messages[].cid`.
+- Multiple messages sharing a CID and multiple CIDs in one chat document.
 - Chat without CID.
 - Context returned by both CID and run ID.
 - Feedback with and without the confirmed correlation field.

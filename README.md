@@ -4,11 +4,11 @@ A small Python pipeline that reconstructs a complete NORA user interaction from 
 
 ## What it does
 
-1. Reads one chat document by `id`, or every chat with `--all`.
-2. Extracts the chat `cid` values.
+1. Reads CIDs from `chat_history.messages[].cid`.
+2. Uses each message CID as the interaction correlation key.
 3. Reads both context containers where `run_id` references the chat `cid`.
 4. Preserves the matching run IDs with the interaction.
-5. Reads feedback by `cid`.
+5. Reads feedback where the chat CID appears in `feedbacks[].cid_list`.
 6. Writes a readable interaction CSV and a complete JSONL audit log.
 7. Optionally writes either LLM-training JSONL or graph node/edge CSV files.
 
@@ -35,7 +35,7 @@ Authentication uses `DefaultAzureCredential`; Cosmos account keys are not stored
 pip install -r requirements.txt
 Copy-Item .env.example .env
 az login
-python app.py "5638529c-2db7-45fe-8c2f-5dcfd46778c8"
+python app.py "CHAT-CID"
 ```
 
 For a trial dataset run, set `BATCH_LIMIT=10` in `.env` and run `python app.py --all`. Set `BATCH_LIMIT=0` only when ready to process every chat.

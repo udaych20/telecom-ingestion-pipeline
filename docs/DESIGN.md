@@ -22,7 +22,7 @@
 
 ## Query design
 
-The pipeline performs cross-partition parameterized queries because partition keys were not provided. Each chat CID is queried as `run_id` in both context containers and as `cid` in feedback. Dataset mode reuses one Cosmos client and streams IDs in bounded in-memory batches, but still performs queries per interaction. This is suitable for validation; high-volume production ingestion should use known partition keys, bulk concurrency, or the Cosmos change feed.
+The pipeline performs cross-partition parameterized queries because partition keys were not provided. Chat CIDs are enumerated and matched through `messages[].cid`. Each message CID is queried as `run_id` in both context containers. Feedback uses an `EXISTS` subquery with `ARRAY_CONTAINS` against `feedbacks[].cid_list`. Dataset mode reuses one Cosmos client and streams IDs in bounded in-memory batches, but still performs queries per interaction. This is suitable for validation; high-volume production ingestion should use known partition keys, bulk concurrency, or the Cosmos change feed.
 
 Complete-only filtering happens after correlation. An interaction is saved only when all four assembled lists are non-empty. A missing source is a normal skip; query or export exceptions remain failures.
 
@@ -31,7 +31,7 @@ Complete-only filtering happens after correlation. An interaction is saved only 
 - Missing endpoint or argument: show usage and exit before connecting.
 - Chat not found: record a clear failure for that interaction.
 - Authentication, authorization, throttling, network, and export errors inside an interaction: record the error in `failed_interactions.csv` and continue.
-- Failure to connect or enumerate all chat IDs: stop the run because there is no interaction ID to record.
+- Failure to connect or enumerate chat CIDs: stop the run because there is no correlation key to process.
 - Unknown ingestion mode: write the base logs, record each attempted interaction as failed, and continue.
 
 ## Idempotency

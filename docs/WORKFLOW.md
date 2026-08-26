@@ -7,7 +7,7 @@ Load .env
    |
 Authenticate with DefaultAzureCredential
    |
-Read chat by id
+Read chat where messages[].cid matches
    |
 Discover cid values
    |
@@ -15,7 +15,7 @@ Read chat cid
    |
 Read both context containers where run_id = cid
    |
-Read feedback where cid = cid
+Read feedback where feedbacks[].cid_list contains cid
    |
 Assemble complete interaction
    |
@@ -41,6 +41,6 @@ No schema assumption should move into production code until it is documented and
 
 ## Complete-dataset workflow
 
-`python app.py --all` enumerates chat IDs and applies the normal workflow using one Cosmos connection. IDs are streamed in groups of `BATCH_SIZE`. `BATCH_LIMIT=0` means every enumerated ID; a positive value restricts a trial run. Failed interactions are appended to `failed_interactions.csv`, and processing continues.
+`python app.py --all` enumerates distinct chat CIDs and applies the normal workflow using one Cosmos connection. CIDs are streamed in groups of `BATCH_SIZE`. `BATCH_LIMIT=0` means every enumerated CID; a positive value restricts a trial run. Failed interactions are appended to `failed_interactions.csv`, and processing continues.
 
 `python app.py --all-complete` uses the same batches but exports only interactions containing chat history, all-tools context, UAT context, and feedback. Missing any source causes a skip, not a failure. The final console line reports succeeded, skipped, and failed counts.
