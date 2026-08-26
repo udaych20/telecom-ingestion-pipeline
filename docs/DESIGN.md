@@ -21,7 +21,7 @@
 
 ## Query design
 
-The pipeline performs cross-partition parameterized queries because partition keys were not provided. Each correlation value is queried separately. Dataset mode reuses one Cosmos client and database connection, but still performs queries per interaction. This is suitable for validation; high-volume production ingestion should use known partition keys, batching, or the Cosmos change feed.
+The pipeline performs cross-partition parameterized queries because partition keys were not provided. Each chat CID is queried as `run_id` in both context containers and as `cid` in feedback. Dataset mode reuses one Cosmos client and database connection, but still performs queries per interaction. This is suitable for validation; high-volume production ingestion should use known partition keys, batching, or the Cosmos change feed.
 
 ## Failure behavior
 

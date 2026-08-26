@@ -12,8 +12,9 @@ python -m py_compile app.py
 
 - Recursive `cid` extraction from dictionaries and lists.
 - Multiple and duplicate `run_id` values.
-- Run IDs discovered from either context container.
-- Both context containers queried by CID and discovered run IDs.
+- Both context containers queried with `run_id = chat cid`.
+- Feedback queried with `cid = chat cid`.
+- Missing chat CID produces a recorded interaction failure.
 - Context de-duplication by document ID.
 - CSV header creation and row appending.
 - LLM export skips incomplete message pairs.

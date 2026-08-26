@@ -22,22 +22,15 @@ Outputs:
 ## Container relationship
 
 ```text
-chat-history-uat.id
+chat-history-uat.cid ---------------------> chat-feedback.cid
         |
-        v
-       cid ----------------------> chat-feedback.cid
+        | referenced by run_id
+        +----------------> context-history-all-tools.run_id
         |
-        v
-context-history-all-tools
-        |
-        v
-      run_id
-        |
-        v
-context-history-uat
+        `----------------> context-history-uat.run_id
 ```
 
-Both context containers are first queried by the chat `cid`. Run IDs found in either result are then used to retrieve the remaining related records from both context containers. Duplicate documents are removed by document `id`.
+The chat `cid` is the primary correlation value. Both context containers are queried with `run_id = cid`, while feedback is queried with `cid = cid`. Duplicate documents are removed by document `id`.
 
 ## Scope
 

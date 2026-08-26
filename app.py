@@ -141,14 +141,13 @@ def get_interaction(database, interaction_id):
     if not chats:
         raise ValueError(f"Chat not found: {interaction_id}")
 
-    cids = find_values(chats, "cid") or [interaction_id]
-    tool_history = query(tools, "cid", cids)
-    context_history = query(context, "cid", cids)
+    cids = find_values(chats, "cid")
+    if not cids:
+        raise ValueError(f"No cid found in chat: {interaction_id}")
 
+    tool_history = query(tools, "run_id", cids)
+    context_history = query(context, "run_id", cids)
     run_ids = find_values(tool_history + context_history, "run_id")
-    if run_ids:
-        tool_history += query(tools, "run_id", run_ids)
-        context_history += query(context, "run_id", run_ids)
 
     feedback = query(feedback_container, "cid", cids)
 

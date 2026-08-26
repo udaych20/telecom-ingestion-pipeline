@@ -31,8 +31,8 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 |---|---|---|
 | FR-01 | Accept a chat interaction ID | `python app.py <id>` starts the lookup |
 | FR-02 | Read chat records | Matching chat documents are returned or a clear error is raised |
-| FR-03 | Correlate by `cid` | All discovered `cid` values are queried |
-| FR-04 | Correlate by `run_id` | Run IDs found in either context container are used to query both context containers |
+| FR-03 | Correlate by `cid` | All CID values are extracted from the chat record |
+| FR-04 | Correlate contexts | Both context containers are queried where `run_id` references a chat CID |
 | FR-05 | Read feedback | Feedback is queried by confirmed `cid` |
 | FR-06 | Log complete data | Original records are retained in JSONL and in the CSV `data` column |
 | FR-07 | Support LLM export | `INGESTION_MODE=llm` creates message-pair JSONL |
@@ -57,6 +57,6 @@ Given an authorized Azure identity and a valid chat ID, running the command must
 ## Open decisions
 
 1. Confirm the actual feedback correlation field.
-2. Confirm whether chat `id` is a valid fallback when no `cid` exists.
+2. Confirm whether every production chat record contains `cid`; missing CID currently fails the interaction.
 3. Define personal-data redaction requirements before training use.
 4. Select the final LLM platform or graph database if direct ingestion is required.

@@ -6,8 +6,8 @@ A small Python pipeline that reconstructs a complete NORA user interaction from 
 
 1. Reads one chat document by `id`, or every chat with `--all`.
 2. Extracts the chat `cid` values.
-3. Reads both context containers by `cid`.
-4. Extracts `run_id` values from both context containers and reads any additional matching context.
+3. Reads both context containers where `run_id` references the chat `cid`.
+4. Preserves the matching run IDs with the interaction.
 5. Reads feedback by `cid`.
 6. Writes a readable interaction CSV and a complete JSONL audit log.
 7. Optionally writes either LLM-training JSONL or graph node/edge CSV files.

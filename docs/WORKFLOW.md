@@ -11,11 +11,11 @@ Read chat by id
    |
 Discover cid values
    |
-Read both context containers by cid
+Read chat cid
    |
-Discover run_id values from both context results
+Read both context containers where run_id = cid
    |
-Read both context containers by run_id + read feedback by cid
+Read feedback where cid = cid
    |
 Assemble complete interaction
    |
