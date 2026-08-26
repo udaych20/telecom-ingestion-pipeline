@@ -60,8 +60,8 @@
   <main id="app"><div class="empty"><strong>Choose the generated interactions.csv</strong><span>Everything stays in your browser; no data is uploaded.</span></div></main>
 <script>
 (() => {
-  const sourceLabels = {chat_history:'Chat history',tool_history:'Tool history',context_history:'Context history',feedback:'Feedback'};
-  const preferred = ['user_content','user_message','query','issue','assistant_content','assistant_response','response','content','message','function_name','tool_name','name','arguments','result','error','rating','feedback','comment','created_at','timestamp','status'];
+  const sourceLabels = {chat_history:'Chat history',tool_history:'Tool history',context_history:'Context history (Agent)',feedback:'Feedback'};
+  const preferred = ['agent','function_name','function_arguments','function_result','user_content','user_message','query','issue','assistant_content','assistant_response','response','content','message','tool_name','name','arguments','result','error','rating','feedback','comment','created_at','timestamp','status'];
   const state = { groups:[], selected:null, query:'', source:'' };
   const app = document.querySelector('#app'), error = document.querySelector('#error'), search = document.querySelector('#search'), source = document.querySelector('#source');
 
@@ -114,6 +114,7 @@
     let body='';
     if(row.parsed) {
       if(row.source==='chat_history' && Array.isArray(row.parsed.messages)) body=renderChatMessages(row.parsed.messages);
+      else if(row.source==='context_history') body=renderContextHistory(row.parsed);
       else { const fields=meaningfulFields(row.parsed); body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>'; }
     } else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;
     return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(row.parsed?JSON.stringify(row.parsed,null,2):row.data)}</pre></details></article>`;
@@ -128,6 +129,17 @@
       return `<div class="chat-message${roleClass}"><span class="chat-role">${esc(roleLabel)}</span><div class="chat-content">${highlight(display(content))}</div></div>`;
     }).filter(Boolean);
     return items.length?`<div class="chat-thread">${items.join('')}</div>`:'<span class="hint">No chat message content found. Expand the complete JSON below.</span>';
+  }
+  function renderContextHistory(record) {
+    const fields = [
+      ['Agent', record.agent],
+      ['Function name', record.function_name],
+      ['Function arguments', record.function_arguments],
+      ['Function result', record.function_result]
+    ].filter(([,value])=>isUseful(value));
+    return fields.length
+      ? fields.map(([name,value])=>`<div class="field"><div class="field-name">${esc(name)}</div><div class="value">${highlight(display(value))}</div></div>`).join('')
+      : '<span class="hint">No agent/function summary fields found. Expand the complete JSON below.</span>';
   }
   function meaningfulFields(value) {
     const found=new Map(); walk(value,'',found); const ranked=[...found].sort((a,b)=>{ const ai=preferred.indexOf(a[0].split('.').pop()),bi=preferred.indexOf(b[0].split('.').pop()); return (ai<0?999:ai)-(bi<0?999:bi); }); return ranked.slice(0,14);
