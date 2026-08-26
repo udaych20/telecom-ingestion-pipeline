@@ -12,7 +12,8 @@ python -m py_compile app.py
 
 - Recursive `cid` extraction from dictionaries and lists.
 - Multiple and duplicate `run_id` values.
-- Both context containers queried with `run_id = chat cid`.
+- All-tools context queried with `cid = message cid`.
+- UAT context queried using every run ID returned by all-tools context.
 - Feedback queried through nested `feedbacks[].cid_list`.
 - Multiple feedback items and multiple CIDs in one `cid_list`.
 - Missing chat CID produces a recorded interaction failure.

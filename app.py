@@ -171,9 +171,9 @@ def get_interaction(database, cid):
     if not chats:
         raise ValueError(f"Chat not found for cid: {cid}")
 
-    tool_history = query(tools, "run_id", [cid])
-    context_history = query(context, "run_id", [cid])
-    run_ids = find_values(tool_history + context_history, "run_id")
+    tool_history = query(tools, "cid", [cid])
+    run_ids = find_values(tool_history, "run_id")
+    context_history = query(context, "run_id", run_ids) if run_ids else []
 
     feedback = query_feedback(feedback_container, [cid])
 
@@ -285,7 +285,7 @@ if __name__ == "__main__":
                 log_failure(interaction_id, error)
                 print(f"Failed {interaction_id}: {error}")
         if complete_only:
-            missing = ", ".join(f"{name}={count}" for name, count in missing_counts.items())
+            missing = ", ".join(f"missing_{name}={count}" for name, count in missing_counts.items())
             print(f"Batch {batch_number}: complete={batch_success}, skipped={batch_skipped}, {missing}")
 
     client.close()

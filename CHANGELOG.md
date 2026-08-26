@@ -11,5 +11,6 @@
 - Changed dataset correlation to enumerate and query nested `messages[].data.cid` values.
 - Added per-batch complete and missing-container counts.
 - Corrected feedback correlation to search nested `feedbacks[].cid_list` values.
+- Corrected context correlation to use all-tools `cid` as the bridge to UAT `run_id`.
 - Corrected correlation so context `run_id` references chat `cid` and feedback matches chat `cid`.
 - Added the spec-driven documentation set.

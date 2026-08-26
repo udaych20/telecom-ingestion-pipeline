@@ -5,13 +5,13 @@
 | Container | Required link | Observed content |
 |---|---|---|
 | Chat history | `messages[].data.cid` | User content, assistant response, conversation details |
-| Context history — all tools | `run_id` references chat `cid` | Function name, arguments, result, error |
-| Context history — UAT | `run_id` references chat `cid` | Agent/tool execution context |
+| Context history — all tools | `cid` matches message CID; provides `run_id` | Function name, arguments, result, error |
+| Context history — UAT | `run_id` matches an all-tools run ID | Agent/tool execution context |
 | Chat feedback | `feedbacks[].cid_list` contains chat `cid` | User feedback and review details |
 
 Fields may be nested. The script recursively searches for `cid`, `run_id`, and supported text fields.
 
-The message `cid` is used as the lookup value for `run_id` in both context containers. Feedback documents match through the nested `feedbacks` array when a feedback item's `cid_list` contains that CID. Results are de-duplicated by document `id`.
+The message CID queries `context-history-all-tools.cid`. Run IDs from those matches query `context-history-uat.run_id`. Feedback matches when a nested `feedbacks[].cid_list` contains the message CID. Results are de-duplicated by document `id`.
 
 ## Complete interaction object
 

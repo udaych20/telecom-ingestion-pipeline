@@ -24,13 +24,14 @@ Outputs:
 ```text
 chat-history-uat.messages[].data.cid --> chat-feedback.feedbacks[].cid_list
         |
-        | referenced by run_id
-        +----------------> context-history-all-tools.run_id
+        | matched by cid
+        +----------------> context-history-all-tools.cid
         |
+        | yields run_id
         `----------------> context-history-uat.run_id
 ```
 
-The message `cid` is the primary correlation value. Both context containers are queried with `run_id = cid`. Feedback matches when its nested `feedbacks[].cid_list` contains the message CID. Duplicate documents are removed by document `id`.
+The message CID is matched to `context-history-all-tools.cid` and nested feedback CID lists. Run IDs are extracted from matching all-tools records and used to query `context-history-uat.run_id`. Duplicate documents are removed by document `id`.
 
 ## Scope
 

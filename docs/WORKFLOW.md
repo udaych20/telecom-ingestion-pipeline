@@ -13,7 +13,9 @@ Discover cid values
    |
 Read chat cid
    |
-Read both context containers where run_id = cid
+Read context-history-all-tools where cid matches
+   |
+Extract run_id values and read context-history-uat
    |
 Read feedback where feedbacks[].cid_list contains cid
    |

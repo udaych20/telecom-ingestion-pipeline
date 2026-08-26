@@ -15,7 +15,8 @@ Use `python app.py --all-complete` when downstream data must contain all four so
 | Credential unavailable | No Azure CLI login or managed identity | Run `az login` locally or configure managed identity |
 | HTTP 403 | Missing Cosmos data-plane role | Assign Cosmos DB Built-in Data Reader |
 | Chat not found | Wrong ID, database, container, or environment | Verify `.env` and query the source container |
-| Empty tool/context output | Missing or differently named correlation field | Inspect representative source JSON |
+| Empty tool history | No all-tools record has the message CID in `cid` | Confirm the all-tools CID field |
+| Empty context history | All-tools has no run ID, or UAT has no matching `run_id` | Inspect the run-ID bridge |
 | Empty feedback | CID is absent from `feedbacks[].cid_list` or schema differs | Inspect the nested feedback array |
 | Duplicate output | Append-only rerun | Remove/archive output or add downstream deduplication |
 | Entries in failure CSV | Per-interaction query or export error | Review the error, correct the cause, and rerun the affected ID |

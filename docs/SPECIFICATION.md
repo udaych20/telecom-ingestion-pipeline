@@ -32,7 +32,8 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 | FR-01 | Accept a message CID | `python app.py <cid>` starts the lookup |
 | FR-02 | Read chat records | Chat documents containing `messages[].data.cid` are returned or a clear error is raised |
 | FR-03 | Correlate by `cid` | Distinct CIDs are enumerated from the nested messages array |
-| FR-04 | Correlate contexts | Both context containers are queried where `run_id` references a chat CID |
+| FR-04 | Correlate tool context | All-tools records are queried where `cid` matches the message CID |
+| FR-04A | Correlate detailed context | Run IDs from all-tools records query UAT context by `run_id` |
 | FR-05 | Read feedback | Feedback is queried where `feedbacks[].cid_list` contains the chat CID |
 | FR-06 | Log complete data | Original records are retained in JSONL and in the CSV `data` column |
 | FR-07 | Support LLM export | `INGESTION_MODE=llm` creates message-pair JSONL |

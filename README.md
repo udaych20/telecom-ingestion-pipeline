@@ -6,8 +6,8 @@ A small Python pipeline that reconstructs a complete NORA user interaction from 
 
 1. Reads CIDs from `chat_history.messages[].data.cid`.
 2. Uses each message CID as the interaction correlation key.
-3. Reads both context containers where `run_id` references the chat `cid`.
-4. Preserves the matching run IDs with the interaction.
+3. Reads `context-history-all-tools` where `cid` matches the message CID.
+4. Extracts its `run_id` values and reads `context-history-uat` using those run IDs.
 5. Reads feedback where the chat CID appears in `feedbacks[].cid_list`.
 6. Writes a readable interaction CSV and a complete JSONL audit log.
 7. Optionally writes either LLM-training JSONL or graph node/edge CSV files.
