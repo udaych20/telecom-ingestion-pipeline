@@ -64,141 +64,27 @@
   const preferred = ['agent','function_name','function_arguments','function_result','user_content','user_message','query','issue','assistant_content','assistant_response','response','content','message','tool_name','name','arguments','result','error','rating','feedback','comment','created_at','timestamp','status'];
   const state = { groups:[], selected:null, query:'', source:'' };
   const app = document.querySelector('#app'), error = document.querySelector('#error'), search = document.querySelector('#search'), source = document.querySelector('#source');
-
-  document.querySelector('#file').addEventListener('change', async e => {
-    const file = e.target.files[0]; if (!file) return;
-    try { load(parseCSV(await file.text())); error.style.display='none'; }
-    catch (ex) { showError(ex.message); }
-  });
-  search.addEventListener('input', e => { state.query=e.target.value.trim().toLowerCase(); render(); });
-  source.addEventListener('change', e => { state.source=e.target.value; render(); });
-
-  function parseCSV(text) {
-    text=text.replace(/^\uFEFF/,''); const rows=[]; let row=[], cell='', quoted=false;
-    for (let i=0;i<text.length;i++) { const c=text[i];
-      if (quoted) { if (c==='"' && text[i+1]==='"') { cell+='"'; i++; } else if(c==='"') quoted=false; else cell+=c; }
-      else if(c==='"') quoted=true; else if(c===',') { row.push(cell); cell=''; }
-      else if(c==='\n') { row.push(cell.replace(/\r$/,'')); if(row.some(v=>v!=='')) rows.push(row); row=[]; cell=''; }
-      else cell+=c;
-    }
-    if (quoted) throw new Error('The CSV ends inside a quoted value. It may be incomplete.');
-    if (cell || row.length) { row.push(cell.replace(/\r$/,'')); rows.push(row); }
-    if (!rows.length) throw new Error('The selected CSV is empty.');
-    const headers=rows.shift().map(h=>h.trim());
-    for (const required of ['interaction_id','source','data']) if(!headers.includes(required)) throw new Error(`Missing required column: ${required}`);
-    return rows.map((values,n) => Object.fromEntries(headers.map((h,i)=>[h,values[i]??'']))).map((r,n)=>{
-      try { r.parsed=JSON.parse(r.data); } catch { r.parsed=null; r.jsonError=`Invalid JSON on CSV row ${n+2}`; } return r;
-    });
-  }
-  function load(rows) {
-    const map=new Map(); for(const row of rows) { const id=row.interaction_id||'(missing interaction ID)'; if(!map.has(id)) map.set(id,[]); map.get(id).push(row); }
-    state.groups=[...map].map(([id,records])=>({id,records,haystack:(id+' '+records.map(r=>r.data).join(' ')).toLowerCase()}));
-    state.selected=state.groups[0]?.id; search.disabled=source.disabled=false;
-    const sources=[...new Set(rows.map(r=>r.source).filter(Boolean))]; source.innerHTML='<option value="">All sources</option>'+sources.map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s]||s)}</option>`).join(''); render();
-  }
-  function render() {
-    const visible=state.groups.filter(g=>!state.query||g.haystack.includes(state.query)).filter(g=>!state.source||g.records.some(r=>r.source===state.source));
-    if(!visible.length) { app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try a broader search or source filter.</span></div>'; return; }
-    if(!visible.some(g=>g.id===state.selected)) state.selected=visible[0].id;
-    const active=visible.find(g=>g.id===state.selected);
-    app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===active.id?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.records.length} source record${g.records.length===1?'':'s'}</small></button>`).join('')}</aside><section class="content">${renderGroup(active)}</section>`;
-    app.querySelectorAll('.interaction').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;render();});
-  }
-  function renderGroup(group) {
-    const records=group.records.filter(r=>!state.source||r.source===state.source); const counts={}; group.records.forEach(r=>counts[r.source]=(counts[r.source]||0)+1);
-    const sections=[...new Set(records.map(r=>r.source))].map(type=>`<h3>${esc(sourceLabels[type]||type)} <span class="pill">${records.filter(r=>r.source===type).length}</span></h3>${records.filter(r=>r.source===type).map(renderRecord).join('')}`).join('');
-    return `<div class="title-row"><div><h2>${highlight(group.id)}</h2><div class="meta">${group.records.length} total source records</div></div><div class="stats">${Object.entries(counts).map(([k,v])=>`<span class="pill">${esc(sourceLabels[k]||k)}: ${v}</span>`).join('')}</div></div>${sections}`;
-  }
-  function renderRecord(row) {
-    const id=row.record_id||row.parsed?.id||'Record'; const meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);
-    let body='';
-    if(row.parsed) {
-      if(row.source==='chat_history' && Array.isArray(row.parsed.messages)) body=renderChatMessages(row.parsed.messages);
-      else if(row.source==='context_history') body=renderContextHistory(row.parsed);
-      else if(row.source==='tool_history') body=renderToolHistory(row.parsed);
-      else if(row.source==='feedback') body=renderFeedback(row.parsed);
-      else { const fields=meaningfulFields(row.parsed); body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>'; }
-    } else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;
-    return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(row.parsed?JSON.stringify(row.parsed,null,2):row.data)}</pre></details></article>`;
-  }
-  function renderChatMessages(messages) {
-    const items=messages.map((message,index)=>{
-      const role=String(message?.type||message?.data?.type||'message').toLowerCase();
-      const content=message?.data?.content ?? message?.content ?? '';
-      if(content==='' || content===null || content===undefined) return '';
-      const roleLabel=role==='user'?'USER':role==='assistant'?'ASSISTANT':role.toUpperCase();
-      const roleClass=role==='assistant'?' assistant':'';
-      return `<div class="chat-message${roleClass}"><span class="chat-role">${esc(roleLabel)}</span><div class="chat-content">${highlight(display(content))}</div></div>`;
-    }).filter(Boolean);
-    return items.length?`<div class="chat-thread">${items.join('')}</div>`:'<span class="hint">No chat message content found. Expand the complete JSON below.</span>';
-  }
-  function renderContextHistory(record) {
-    const fields = [
-      ['Agent', record.agent],
-      ['Function name', record.function_name],
-      ['Function arguments', record.function_arguments],
-      ['Function result', record.function_result]
-    ].filter(([,value])=>isUseful(value));
-    return renderFields(fields, 'No agent/function summary fields found. Expand the complete JSON below.');
-  }
-  function renderToolHistory(record) {
-    const fields = [
-      ['Function name', record.function_name],
-      ['Arguments', record.arguments],
-      ['Function result', record.function_result],
-      ['Error', record.error]
-    ].filter(([,value])=>isUseful(value));
-    return renderFields(fields, 'No tool summary fields found. Expand the complete JSON below.');
-  }
-  function renderFeedback(record) {
-    const fields = [
-      ['User', record.uid],
-      ['Impacted device type', record.impacted_device_type],
-      ['Impacted device', record.impacted_device],
-      ['Metric', record.metric_name],
-      ['Team', record.team_name]
-    ].filter(([,value])=>isUseful(value));
-
-    const feedbackItems = Array.isArray(record.feedbacks) ? record.feedbacks : [];
-    feedbackItems.forEach((item,index) => {
-      const prefix = feedbackItems.length > 1 ? `Feedback ${index + 1} ` : '';
-      [
-        [`${prefix}RCA type`, item?.rca_type],
-        [`${prefix}RCA feedback`, item?.rca_feedback],
-        [`${prefix}Resolution type`, item?.resolution_type],
-        [`${prefix}Resolution`, item?.resolution],
-        [`${prefix}Feedback date`, formatFeedbackDate(item?.feedback_date)]
-      ].forEach(field => { if(isUseful(field[1])) fields.push(field); });
-    });
-
-    return renderFields(fields, 'No feedback summary fields found. Expand the complete JSON below.');
-  }
-  function formatFeedbackDate(value) {
-    if(value===null || value===undefined || value==='') return value;
-    const number = Number(value);
-    if(!Number.isFinite(number)) return value;
-    const milliseconds = number < 100000000000 ? number * 1000 : number;
-    const date = new Date(milliseconds);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-  }
-  function renderFields(fields, emptyMessage) {
-    return fields.length
-      ? fields.map(([name,value])=>`<div class="field"><div class="field-name">${esc(name)}</div><div class="value">${highlight(display(value))}</div></div>`).join('')
-      : `<span class="hint">${esc(emptyMessage)}</span>`;
-  }
-  function meaningfulFields(value) {
-    const found=new Map(); walk(value,'',found); const ranked=[...found].sort((a,b)=>{ const ai=preferred.indexOf(a[0].split('.').pop()),bi=preferred.indexOf(b[0].split('.').pop()); return (ai<0?999:ai)-(bi<0?999:bi); }); return ranked.slice(0,14);
-  }
-  function walk(value,path,out) {
-    if(out.size>60) return; if(Array.isArray(value)) { value.slice(0,20).forEach((v,i)=>walk(v,`${path}[${i}]`,out)); return; }
-    if(value&&typeof value==='object') { for(const [k,v] of Object.entries(value)) { const p=path?`${path}.${k}`:k; if(preferred.includes(k)&&isUseful(v)&&!out.has(p)) out.set(p,v); walk(v,p,out); } }
-  }
-  function isUseful(v) { return v!==null&&v!==''&&(!(Array.isArray(v))||v.length)&&(!(typeof v==='object'&&!Array.isArray(v))||Object.keys(v).length); }
-  function display(v) { if(typeof v==='string') return v; return JSON.stringify(v,null,2); }
-  function label(path) { return path.replace(/\[(\d+)\]/g,' #$1').split('.').map(x=>x.replace(/_/g,' ')).join(' › '); }
-  function highlight(value) { const safe=esc(String(value??'')); if(!state.query) return safe; const q=esc(state.query).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); return safe.replace(new RegExp(`(${q})`,'ig'),'<mark>$1</mark>'); }
-  function esc(value) { return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-  function showError(message) { error.textContent=message; error.style.display='block'; }
+  document.querySelector('#file').addEventListener('change', async e => { const file=e.target.files[0]; if(!file)return; try{load(parseCSV(await file.text()));error.style.display='none';}catch(ex){showError(ex.message);} });
+  search.addEventListener('input',e=>{state.query=e.target.value.trim().toLowerCase();render();}); source.addEventListener('change',e=>{state.source=e.target.value;render();});
+  function parseCSV(text){text=text.replace(/^\uFEFF/,'');const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(quoted){if(c==='"'&&text[i+1]==='"'){cell+='"';i++;}else if(c==='"')quoted=false;else cell+=c;}else if(c==='"')quoted=true;else if(c===','){row.push(cell);cell='';}else if(c==='\n'){row.push(cell.replace(/\r$/,''));if(row.some(v=>v!==''))rows.push(row);row=[];cell='';}else cell+=c;}if(quoted)throw new Error('The CSV ends inside a quoted value. It may be incomplete.');if(cell||row.length){row.push(cell.replace(/\r$/,''));rows.push(row);}if(!rows.length)throw new Error('The selected CSV is empty.');const headers=rows.shift().map(h=>h.trim());for(const required of ['interaction_id','source','data'])if(!headers.includes(required))throw new Error(`Missing required column: ${required}`);return rows.map(values=>Object.fromEntries(headers.map((h,i)=>[h,values[i]??'']))).map((r,n)=>{try{r.parsed=JSON.parse(r.data);}catch{r.parsed=null;r.jsonError=`Invalid JSON on CSV row ${n+2}`;}return r;});}
+  function load(rows){const map=new Map();for(const row of rows){const id=row.interaction_id||'(missing interaction ID)';if(!map.has(id))map.set(id,[]);map.get(id).push(row);}state.groups=[...map].map(([id,records])=>({id,records,haystack:(id+' '+records.map(r=>r.data).join(' ')).toLowerCase()}));state.selected=state.groups[0]?.id;search.disabled=source.disabled=false;const sources=[...new Set(rows.map(r=>r.source).filter(Boolean))];source.innerHTML='<option value="">All sources</option>'+sources.map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s]||s)}</option>`).join('');render();}
+  function render(){const visible=state.groups.filter(g=>!state.query||g.haystack.includes(state.query)).filter(g=>!state.source||g.records.some(r=>r.source===state.source));if(!visible.length){app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try a broader search or source filter.</span></div>';return;}if(!visible.some(g=>g.id===state.selected))state.selected=visible[0].id;const active=visible.find(g=>g.id===state.selected);app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===active.id?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.records.length} source record${g.records.length===1?'':'s'}</small></button>`).join('')}</aside><section class="content">${renderGroup(active)}</section>`;app.querySelectorAll('.interaction').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;render();});}
+  function renderGroup(group){const records=group.records.filter(r=>!state.source||r.source===state.source);const counts={};group.records.forEach(r=>counts[r.source]=(counts[r.source]||0)+1);const sections=[...new Set(records.map(r=>r.source))].map(type=>`<h3>${esc(sourceLabels[type]||type)} <span class="pill">${records.filter(r=>r.source===type).length}</span></h3>${records.filter(r=>r.source===type).map(renderRecord).join('')}`).join('');return `<div class="title-row"><div><h2>${highlight(group.id)}</h2><div class="meta">${group.records.length} total source records</div></div><div class="stats">${Object.entries(counts).map(([k,v])=>`<span class="pill">${esc(sourceLabels[k]||k)}: ${v}</span>`).join('')}</div></div>${sections}`;}
+  function renderRecord(row){const id=row.record_id||row.parsed?.id||'Record';const meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);let body='';if(row.parsed){if(row.source==='chat_history'&&Array.isArray(row.parsed.messages))body=renderChatMessages(row.parsed.messages);else if(row.source==='context_history')body=renderContextHistory(row.parsed);else if(row.source==='tool_history')body=renderToolHistory(row.parsed);else if(row.source==='feedback')body=renderFeedback(row.parsed);else{const fields=meaningfulFields(row.parsed);body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>';}}else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(row.parsed?JSON.stringify(row.parsed,null,2):row.data)}</pre></details></article>`;}
+  function renderChatMessages(messages){const items=messages.map(message=>{const role=String(message?.type||message?.data?.type||'message').toLowerCase();const content=message?.data?.content??message?.content??'';if(content===''||content===null||content===undefined)return'';const roleLabel=role==='user'?'USER':role==='assistant'?'ASSISTANT':role.toUpperCase();const roleClass=role==='assistant'?' assistant':'';return `<div class="chat-message${roleClass}"><span class="chat-role">${esc(roleLabel)}</span><div class="chat-content">${highlight(display(content))}</div></div>`;}).filter(Boolean);return items.length?`<div class="chat-thread">${items.join('')}</div>`:'<span class="hint">No chat message content found. Expand the complete JSON below.</span>';}
+  function renderContextHistory(record){return renderFields([['Agent',record.agent],['Function name',record.function_name],['Function arguments',record.function_arguments],['Function result',record.function_result]].filter(([,v])=>isUseful(v)),'No agent/function summary fields found. Expand the complete JSON below.');}
+  function renderToolHistory(record){return renderFields([['Function name',record.function_name],['Arguments',record.arguments],['Function result',record.function_result],['Error',record.error]].filter(([,v])=>isUseful(v)),'No tool summary fields found. Expand the complete JSON below.');}
+  function renderFeedback(record){const fields=[['User',record.uid],['Impacted device type',record.impacted_device_type],['Impacted device',record.impacted_device],['Metric',record.metric_name],['Team',record.team_name]].filter(([,v])=>isUseful(v));const feedbackItems=Array.isArray(record.feedbacks)?record.feedbacks:[];feedbackItems.forEach((item,index)=>{const prefix=feedbackItems.length>1?`Feedback ${index+1} `:'';[[`${prefix}RCA type`,item?.rca_type],[`${prefix}RCA feedback`,item?.rca_feedback],[`${prefix}Resolution type`,item?.resolution_type],[`${prefix}Resolution`,item?.resolution],[`${prefix}Feedback date`,formatFeedbackDate(item?.feedback_date)],[`${prefix}Feedback review comment`,item?.feedback_review_comment],[`${prefix}Review status`,item?.review_status],[`${prefix}Review category`,item?.review_category],[`${prefix}Review sub category`,item?.review_sub_category],[`${prefix}Updated by`,item?.updated_by],[`${prefix}Defect type`,item?.defect_type],[`${prefix}Severity`,item?.severity],[`${prefix}Dev owner`,item?.dev_owner],[`${prefix}Status`,item?.status],[`${prefix}Date resolved`,item?.date_resolved]].forEach(field=>{if(isUseful(field[1]))fields.push(field);});});const negative=record.negative_feedback;if(negative&&typeof negative==='object'){[['Negative feedback gap type',negative.gap_type],['Negative feedback confidence score',negative.confidence_score],['Negative feedback reasoning',negative.reasoning],['Negative feedback criticality',negative.criticality],['Negative feedback not defect',negative.not_defect],['Negative feedback comments',negative.comments]].forEach(field=>{if(isUseful(field[1]))fields.push(field);});}return renderFields(fields,'No feedback summary fields found. Expand the complete JSON below.');}
+  function formatFeedbackDate(value){if(value===null||value===undefined||value==='')return value;const number=Number(value);if(!Number.isFinite(number))return value;const milliseconds=number<100000000000?number*1000:number;const date=new Date(milliseconds);return Number.isNaN(date.getTime())?value:date.toLocaleString();}
+  function renderFields(fields,emptyMessage){return fields.length?fields.map(([name,value])=>`<div class="field"><div class="field-name">${esc(name)}</div><div class="value">${highlight(display(value))}</div></div>`).join(''):`<span class="hint">${esc(emptyMessage)}</span>`;}
+  function meaningfulFields(value){const found=new Map();walk(value,'',found);const ranked=[...found].sort((a,b)=>{const ai=preferred.indexOf(a[0].split('.').pop()),bi=preferred.indexOf(b[0].split('.').pop());return(ai<0?999:ai)-(bi<0?999:bi);});return ranked.slice(0,14);}
+  function walk(value,path,out){if(out.size>60)return;if(Array.isArray(value)){value.slice(0,20).forEach((v,i)=>walk(v,`${path}[${i}]`,out));return;}if(value&&typeof value==='object'){for(const[k,v]of Object.entries(value)){const p=path?`${path}.${k}`:k;if(preferred.includes(k)&&isUseful(v)&&!out.has(p))out.set(p,v);walk(v,p,out);}}}
+  function isUseful(v){return v!==null&&v!==''&&(!(Array.isArray(v))||v.length)&&(!(typeof v==='object'&&!Array.isArray(v))||Object.keys(v).length);}
+  function display(v){if(typeof v==='string')return v;return JSON.stringify(v,null,2);}
+  function label(path){return path.replace(/\[(\d+)\]/g,' #$1').split('.').map(x=>x.replace(/_/g,' ')).join(' › ');}
+  function highlight(value){const safe=esc(String(value??''));if(!state.query)return safe;const q=esc(state.query).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');return safe.replace(new RegExp(`(${q})`,'ig'),'<mark>$1</mark>');}
+  function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+  function showError(message){error.textContent=message;error.style.display='block';}
 })();
 </script>
 </body>
