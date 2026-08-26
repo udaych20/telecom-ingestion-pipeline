@@ -21,6 +21,7 @@ CONTEXT_CONTAINER = os.getenv("COSMOS_CONTEXT_CONTAINER", "context-history-uat")
 FEEDBACK_CONTAINER = os.getenv("COSMOS_FEEDBACK_CONTAINER", "chat-feedback")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "output")
 INGESTION_MODE = os.getenv("INGESTION_MODE", "none").lower()
+BATCH_LIMIT = int(os.getenv("BATCH_LIMIT", "0"))
 
 
 def query(container, field, values):
@@ -130,11 +131,7 @@ def append_csv(path, headers, rows):
         writer.writerows(rows)
 
 
-def get_interaction(interaction_id):
-    credential = DefaultAzureCredential()
-    client = CosmosClient(ENDPOINT, credential=credential)
-    database = client.get_database_client(DATABASE)
-
+def get_interaction(database, interaction_id):
     chat = database.get_container_client(CHAT_CONTAINER)
     tools = database.get_container_client(TOOLS_CONTAINER)
     context = database.get_container_client(CONTEXT_CONTAINER)
@@ -146,16 +143,14 @@ def get_interaction(interaction_id):
 
     cids = find_values(chats, "cid") or [interaction_id]
     tool_history = query(tools, "cid", cids)
-    run_ids = find_values(tool_history, "run_id")
-
     context_history = query(context, "cid", cids)
+
+    run_ids = find_values(tool_history + context_history, "run_id")
     if run_ids:
+        tool_history += query(tools, "run_id", run_ids)
         context_history += query(context, "run_id", run_ids)
 
     feedback = query(feedback_container, "cid", cids)
-
-    client.close()
-    credential.close()
 
     return {
         "interaction_id": interaction_id,
@@ -163,25 +158,16 @@ def get_interaction(interaction_id):
         "cids": cids,
         "run_ids": run_ids,
         "chat_history": chats,
-        "tool_history": tool_history,
+        "tool_history": remove_duplicates(tool_history),
         "context_history": remove_duplicates(context_history),
         "feedback": feedback,
     }
 
 
-if __name__ == "__main__":
-    if not ENDPOINT or len(sys.argv) != 2:
-        print("Usage: python app.py <chat-id>")
-        print("Set COSMOS_ENDPOINT and optionally COSMOS_DATABASE first.")
-        raise SystemExit(1)
-
-    interaction = get_interaction(sys.argv[1])
-    print(json.dumps(interaction, indent=2, default=str))
-
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+def save_interaction(interaction):
     save_interaction_csv(interaction)
-
-    with open(os.path.join(OUTPUT_DIR, "interactions.jsonl"), "a", encoding="utf-8") as file:
+    path = os.path.join(OUTPUT_DIR, "interactions.jsonl")
+    with open(path, "a", encoding="utf-8") as file:
         file.write(json.dumps(interaction, default=str) + "\n")
 
     if INGESTION_MODE == "llm":
@@ -190,3 +176,43 @@ if __name__ == "__main__":
         ingest_for_graph(interaction)
     elif INGESTION_MODE != "none":
         raise ValueError("INGESTION_MODE must be none, llm, or knowledge_graph")
+
+
+def get_all_chat_ids(database):
+    chat = database.get_container_client(CHAT_CONTAINER)
+    sql = "SELECT VALUE c.id FROM c WHERE IS_DEFINED(c.id)"
+    ids = chat.query_items(sql, enable_cross_partition_query=True)
+    return list(ids)[:BATCH_LIMIT or None]
+
+
+def log_failure(interaction_id, error):
+    path = os.path.join(OUTPUT_DIR, "failed_interactions.csv")
+    append_csv(path, ["interaction_id", "error"], [(interaction_id, str(error))])
+
+
+if __name__ == "__main__":
+    if not ENDPOINT or len(sys.argv) != 2:
+        print("Usage: python app.py <chat-id> | --all")
+        print("Set COSMOS_ENDPOINT and optionally COSMOS_DATABASE first.")
+        raise SystemExit(1)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    credential = DefaultAzureCredential()
+    client = CosmosClient(ENDPOINT, credential=credential)
+    database = client.get_database_client(DATABASE)
+
+    interaction_ids = get_all_chat_ids(database) if sys.argv[1] == "--all" else [sys.argv[1]]
+    success = 0
+    for interaction_id in interaction_ids:
+        try:
+            interaction = get_interaction(database, interaction_id)
+            save_interaction(interaction)
+            success += 1
+            print(f"Processed {interaction_id}")
+        except Exception as error:
+            log_failure(interaction_id, error)
+            print(f"Failed {interaction_id}: {error}")
+
+    client.close()
+    credential.close()
+    print(f"Completed: {success} succeeded, {len(interaction_ids) - success} failed")

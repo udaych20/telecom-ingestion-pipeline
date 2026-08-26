@@ -4,6 +4,8 @@
 
 Run one chat ID at a time. The script prints the assembled interaction and appends output files under `OUTPUT_DIR`.
 
+For dataset validation, run `python app.py --all`. Use a small `BATCH_LIMIT` first because cross-partition queries consume Cosmos request units. Set it to `0` only when ready for the complete dataset.
+
 ## Common failures
 
 | Symptom | Likely cause | Action |

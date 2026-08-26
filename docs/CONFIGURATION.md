@@ -12,5 +12,6 @@ Configuration is loaded from process environment variables and an optional `.env
 | `COSMOS_FEEDBACK_CONTAINER` | No | `chat-feedback` | Feedback container |
 | `OUTPUT_DIR` | No | `output` | Output directory |
 | `INGESTION_MODE` | No | `none` | `none`, `llm`, or `knowledge_graph` |
+| `BATCH_LIMIT` | No | `0` | Maximum chats for `--all`; `0` means every chat |
 
 Do not place client secrets, access tokens, or Cosmos account keys in `.env`. `DefaultAzureCredential` provides authentication.

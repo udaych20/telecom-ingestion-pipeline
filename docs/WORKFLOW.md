@@ -36,3 +36,7 @@ INGESTION_MODE?
 7. Update setup, configuration, and operations documentation before release.
 
 No schema assumption should move into production code until it is documented and verified against representative Cosmos records.
+
+## Complete-dataset workflow
+
+`python app.py --all` reads every chat ID and applies the normal workflow using one Cosmos connection. `BATCH_LIMIT` can restrict a trial run. Failed interactions are recorded and processing continues.

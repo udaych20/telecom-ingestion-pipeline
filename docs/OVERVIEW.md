@@ -36,7 +36,7 @@ context-history-all-tools
 context-history-uat
 ```
 
-The context container is queried by both `cid` and `run_id`, then duplicate documents are removed by document `id`.
+Both context containers are first queried by the chat `cid`. Run IDs found in either result are then used to retrieve the remaining related records from both context containers. Duplicate documents are removed by document `id`.
 
 ## Scope
 

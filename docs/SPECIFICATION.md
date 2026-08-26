@@ -38,6 +38,7 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 | FR-07 | Support LLM export | `INGESTION_MODE=llm` creates message-pair JSONL |
 | FR-08 | Support graph export | `INGESTION_MODE=knowledge_graph` creates nodes and edges CSVs |
 | FR-09 | Use keyless auth | Authentication is performed by `DefaultAzureCredential` |
+| FR-10 | Process a complete dataset | `python app.py --all` processes all chat IDs and records per-ID failures |
 
 ## Non-functional requirements
 

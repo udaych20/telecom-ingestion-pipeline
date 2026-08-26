@@ -25,3 +25,13 @@ python app.py "5638529c-2db7-45fe-8c2f-5dcfd46778c8"
 Check `output/interactions.csv` for readable records and `output/interactions.jsonl` for the complete assembled interaction.
 
 To create LLM preparation data, set `INGESTION_MODE=llm`. To create graph import files, set `INGESTION_MODE=knowledge_graph`.
+
+## Test the full dataset
+
+Start with `BATCH_LIMIT=10` in `.env`, then run:
+
+```powershell
+python app.py --all
+```
+
+After checking the output, set `BATCH_LIMIT=0` to process every chat. Failures are recorded in `output/failed_interactions.csv` without stopping the batch.
