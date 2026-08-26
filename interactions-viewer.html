@@ -116,6 +116,7 @@
       if(row.source==='chat_history' && Array.isArray(row.parsed.messages)) body=renderChatMessages(row.parsed.messages);
       else if(row.source==='context_history') body=renderContextHistory(row.parsed);
       else if(row.source==='tool_history') body=renderToolHistory(row.parsed);
+      else if(row.source==='feedback') body=renderFeedback(row.parsed);
       else { const fields=meaningfulFields(row.parsed); body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>'; }
     } else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;
     return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(row.parsed?JSON.stringify(row.parsed,null,2):row.data)}</pre></details></article>`;
@@ -148,6 +149,37 @@
       ['Error', record.error]
     ].filter(([,value])=>isUseful(value));
     return renderFields(fields, 'No tool summary fields found. Expand the complete JSON below.');
+  }
+  function renderFeedback(record) {
+    const fields = [
+      ['User', record.uid],
+      ['Impacted device type', record.impacted_device_type],
+      ['Impacted device', record.impacted_device],
+      ['Metric', record.metric_name],
+      ['Team', record.team_name]
+    ].filter(([,value])=>isUseful(value));
+
+    const feedbackItems = Array.isArray(record.feedbacks) ? record.feedbacks : [];
+    feedbackItems.forEach((item,index) => {
+      const prefix = feedbackItems.length > 1 ? `Feedback ${index + 1} ` : '';
+      [
+        [`${prefix}RCA type`, item?.rca_type],
+        [`${prefix}RCA feedback`, item?.rca_feedback],
+        [`${prefix}Resolution type`, item?.resolution_type],
+        [`${prefix}Resolution`, item?.resolution],
+        [`${prefix}Feedback date`, formatFeedbackDate(item?.feedback_date)]
+      ].forEach(field => { if(isUseful(field[1])) fields.push(field); });
+    });
+
+    return renderFields(fields, 'No feedback summary fields found. Expand the complete JSON below.');
+  }
+  function formatFeedbackDate(value) {
+    if(value===null || value===undefined || value==='') return value;
+    const number = Number(value);
+    if(!Number.isFinite(number)) return value;
+    const milliseconds = number < 100000000000 ? number * 1000 : number;
+    const date = new Date(milliseconds);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
   }
   function renderFields(fields, emptyMessage) {
     return fields.length
