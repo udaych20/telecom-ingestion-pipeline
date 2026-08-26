@@ -5,11 +5,13 @@
 | Container | Required link | Observed content |
 |---|---|---|
 | Chat history | `id`, preferably `cid` | User content, assistant response, conversation details |
-| Tool history | `cid`, `run_id` | Function name, arguments, result, error |
-| Context history | `cid` and/or `run_id` | Agent/tool execution context |
+| Context history — all tools | `cid`, `run_id` | Function name, arguments, result, error |
+| Context history — UAT | `cid`, `run_id` | Agent/tool execution context |
 | Chat feedback | Assumed `cid` | User feedback and review details |
 
 Fields may be nested. The script recursively searches for `cid`, `run_id`, and supported text fields.
+
+Both context containers are queried by `cid` first. Run IDs discovered in either result are then queried against both context containers, and records are de-duplicated by document `id`.
 
 ## Complete interaction object
 
@@ -55,3 +57,7 @@ Node labels are `Interaction`, `Conversation`, and `Run`. Relationships are:
 ```
 
 The CSVs are neutral interchange files; target-specific import headers or commands may still be needed.
+
+## Failure CSV
+
+`failed_interactions.csv` contains `interaction_id` and `error`. It is append-only and may contain repeated failures across reruns.

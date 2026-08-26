@@ -15,3 +15,5 @@ Configuration is loaded from process environment variables and an optional `.env
 | `BATCH_LIMIT` | No | `0` | Maximum chats for `--all`; `0` means every chat |
 
 Do not place client secrets, access tokens, or Cosmos account keys in `.env`. `DefaultAzureCredential` provides authentication.
+
+`BATCH_LIMIT` has no effect when a single chat ID is supplied. Values must be non-negative integers. Environment settings are loaded once when the process starts.

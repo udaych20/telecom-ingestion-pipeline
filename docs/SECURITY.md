@@ -25,6 +25,8 @@ The examples include names, email addresses, device identifiers, telephone numbe
 4. Validate the destination model/provider's data controls.
 5. Keep a traceable dataset version and approval record.
 
+Dataset mode can export every accessible chat record. Use the narrowest Cosmos role scope, a controlled output directory, and a positive `BATCH_LIMIT` during validation to reduce accidental exposure.
+
 ## Reporting
 
 Report suspected credential exposure or unauthorized data output through the organization's security incident process. Do not include live customer records in public issues.

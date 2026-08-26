@@ -10,7 +10,7 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 
 ## Goals
 
-- Retrieve the full interaction starting from a chat `id`.
+- Retrieve one interaction from a chat `id`, or process every chat ID.
 - Authenticate through Microsoft Entra ID using `DefaultAzureCredential`.
 - Preserve original JSON documents.
 - Produce a CSV that is easy to inspect.
@@ -32,13 +32,14 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 | FR-01 | Accept a chat interaction ID | `python app.py <id>` starts the lookup |
 | FR-02 | Read chat records | Matching chat documents are returned or a clear error is raised |
 | FR-03 | Correlate by `cid` | All discovered `cid` values are queried |
-| FR-04 | Correlate by `run_id` | Tool-history run IDs are used to query detailed context |
+| FR-04 | Correlate by `run_id` | Run IDs found in either context container are used to query both context containers |
 | FR-05 | Read feedback | Feedback is queried by confirmed `cid` |
 | FR-06 | Log complete data | Original records are retained in JSONL and in the CSV `data` column |
 | FR-07 | Support LLM export | `INGESTION_MODE=llm` creates message-pair JSONL |
 | FR-08 | Support graph export | `INGESTION_MODE=knowledge_graph` creates nodes and edges CSVs |
 | FR-09 | Use keyless auth | Authentication is performed by `DefaultAzureCredential` |
 | FR-10 | Process a complete dataset | `python app.py --all` processes all chat IDs and records per-ID failures |
+| FR-11 | Limit a trial batch | A positive `BATCH_LIMIT` processes at most that many enumerated chat IDs |
 
 ## Non-functional requirements
 
@@ -47,10 +48,11 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 - Output must be UTF-8.
 - Repeated context results must be de-duplicated.
 - Container names and output mode must be configurable through environment variables.
+- A failed interaction in dataset mode must not stop later interactions.
 
 ## Acceptance scenario
 
-Given an authorized Azure identity and a valid chat ID, running the command must create `interactions.csv` and `interactions.jsonl`. If LLM mode is selected, valid user/assistant pairs must also appear in `llm_training.jsonl`. If graph mode is selected, conversation and run relationships must appear in the two graph CSVs.
+Given an authorized Azure identity and a valid chat ID, running the command must create `interactions.csv` and `interactions.jsonl`. Given `--all`, it must attempt every ID permitted by `BATCH_LIMIT` and record failures without stopping the batch. If LLM mode is selected, valid user/assistant pairs must also appear in `llm_training.jsonl`. If graph mode is selected, conversation and run relationships must appear in the two graph CSVs.
 
 ## Open decisions
 

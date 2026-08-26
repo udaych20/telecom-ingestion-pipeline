@@ -37,3 +37,5 @@ python app.py "KNOWN-CHAT-ID"
 ```
 
 Verify that output files are created and that their correlation IDs match the source records.
+
+For dataset validation, set `BATCH_LIMIT` to a small positive value and run `python app.py --all`. Review `failed_interactions.csv`, then use `BATCH_LIMIT=0` for the complete dataset.

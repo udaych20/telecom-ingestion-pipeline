@@ -11,9 +11,11 @@ Read chat by id
    |
 Discover cid values
    |
-Read tool history -> discover run_id values
+Read both context containers by cid
    |
-Read context by cid and run_id + read feedback by cid
+Discover run_id values from both context results
+   |
+Read both context containers by run_id + read feedback by cid
    |
 Assemble complete interaction
    |
@@ -39,4 +41,4 @@ No schema assumption should move into production code until it is documented and
 
 ## Complete-dataset workflow
 
-`python app.py --all` reads every chat ID and applies the normal workflow using one Cosmos connection. `BATCH_LIMIT` can restrict a trial run. Failed interactions are recorded and processing continues.
+`python app.py --all` enumerates chat IDs and applies the normal workflow using one Cosmos connection. `BATCH_LIMIT=0` means every enumerated ID; a positive value restricts a trial run. Failed interactions are appended to `failed_interactions.csv`, and processing continues. The final console line reports succeeded and failed counts.

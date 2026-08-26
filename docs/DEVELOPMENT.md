@@ -24,6 +24,7 @@ output/              Generated files; ignored by Git
 - Keep Cosmos values parameterized.
 - Do not silently broaden correlation joins.
 - Preserve source JSON in the complete log.
+- Preserve per-interaction fault isolation in dataset mode.
 - Avoid new dependencies unless they clearly reduce complexity.
 
 ## Definition of done

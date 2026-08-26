@@ -2,7 +2,7 @@
 
 ## Normal operation
 
-Run one chat ID at a time. The script prints the assembled interaction and appends output files under `OUTPUT_DIR`.
+For targeted validation, run one chat ID at a time. The script prints progress and appends output files under `OUTPUT_DIR`.
 
 For dataset validation, run `python app.py --all`. Use a small `BATCH_LIMIT` first because cross-partition queries consume Cosmos request units. Set it to `0` only when ready for the complete dataset.
 
@@ -16,6 +16,8 @@ For dataset validation, run `python app.py --all`. Use a small `BATCH_LIMIT` fir
 | Empty tool/context output | Missing or differently named correlation field | Inspect representative source JSON |
 | Empty feedback | Feedback does not use `cid` | Confirm and implement its actual link field |
 | Duplicate output | Append-only rerun | Remove/archive output or add downstream deduplication |
+| Entries in failure CSV | Per-interaction query or export error | Review the error, correct the cause, and rerun the affected ID |
+| Batch stops before processing IDs | Connection or chat-ID enumeration failed | Check credentials, endpoint, role, and network access |
 | HTTP 429 | Cosmos throttling | Retry later; add SDK retry/batch controls for scale |
 
 ## Output retention
@@ -31,3 +33,4 @@ Outputs can contain customer information. Store them only in an approved locatio
 - Output storage encrypted and access controlled.
 - Monitoring and run-level audit identifiers added.
 - Retry, checkpointing, and idempotency designed for batch volume.
+- Trial batch completed before an unrestricted `BATCH_LIMIT=0` run.

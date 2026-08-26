@@ -6,7 +6,7 @@ The pipeline gathers records belonging to one customer interaction from multiple
 
 ## Inputs and outputs
 
-Input: one chat-history document `id` supplied on the command line.
+Input: either one chat-history document `id`, or `--all` to enumerate chat IDs from the chat container. `BATCH_LIMIT` optionally restricts dataset mode.
 
 Outputs:
 
@@ -17,6 +17,7 @@ Outputs:
 | `llm_training.jsonl` | `INGESTION_MODE=llm` | User/assistant training examples |
 | `graph_nodes.csv` | `INGESTION_MODE=knowledge_graph` | Graph nodes |
 | `graph_edges.csv` | `INGESTION_MODE=knowledge_graph` | Graph relationships |
+| `failed_interactions.csv` | When an ID fails | Interaction ID and error message |
 
 ## Container relationship
 
@@ -40,4 +41,4 @@ Both context containers are first queried by the chat `cid`. Run IDs found in ei
 
 ## Scope
 
-The current version is a command-line, single-interaction batch reader. Scheduling, change-feed processing, direct model fine-tuning, and direct graph-database writes are outside the current scope.
+The current version is a command-line reader supporting single-interaction and complete-dataset runs. Dataset mode still performs correlation queries per interaction. Scheduling, change-feed processing, direct model fine-tuning, and direct graph-database writes are outside the current scope.

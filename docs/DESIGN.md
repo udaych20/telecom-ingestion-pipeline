@@ -15,23 +15,25 @@
 - Interaction assembly.
 - Complete CSV/JSONL logging.
 - Mode-specific LLM or graph export.
+- Single-ID or dataset orchestration with per-ID failure logging.
 
 `DefaultAzureCredential` chooses the available identity source. Locally this is normally Azure CLI; in Azure it should be managed identity or workload identity.
 
 ## Query design
 
-The pipeline performs cross-partition parameterized queries because partition keys were not provided. Each correlation value is queried separately. This is simple and correct for a single-interaction CLI, but higher-volume ingestion should batch differently or use known partition keys.
+The pipeline performs cross-partition parameterized queries because partition keys were not provided. Each correlation value is queried separately. Dataset mode reuses one Cosmos client and database connection, but still performs queries per interaction. This is suitable for validation; high-volume production ingestion should use known partition keys, batching, or the Cosmos change feed.
 
 ## Failure behavior
 
-- Missing endpoint or argument: show usage and exit.
-- Chat not found: raise a clear `ValueError`.
-- Authentication, authorization, throttling, or network errors: allow the Azure SDK error to surface.
-- Unknown ingestion mode: write the base logs, then raise a configuration error.
+- Missing endpoint or argument: show usage and exit before connecting.
+- Chat not found: record a clear failure for that interaction.
+- Authentication, authorization, throttling, network, and export errors inside an interaction: record the error in `failed_interactions.csv` and continue.
+- Failure to connect or enumerate all chat IDs: stop the run because there is no interaction ID to record.
+- Unknown ingestion mode: write the base logs, record each attempted interaction as failed, and continue.
 
 ## Idempotency
 
-Files are append-only, so rerunning the same ID creates duplicate rows. This is useful for audit history but not idempotent dataset creation. Production batch ingestion should add a run ID, deduplication step, or overwrite policy.
+Files are append-only, so rerunning an ID or dataset creates duplicate rows. This is useful for audit history but not idempotent dataset creation. Production ingestion should add a run ID, deduplication step, or overwrite policy.
 
 ## Future design options
 

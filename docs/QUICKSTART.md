@@ -24,6 +24,8 @@ python app.py "5638529c-2db7-45fe-8c2f-5dcfd46778c8"
 
 Check `output/interactions.csv` for readable records and `output/interactions.jsonl` for the complete assembled interaction.
 
+The command prints one progress line per ID and a final succeeded/failed summary.
+
 To create LLM preparation data, set `INGESTION_MODE=llm`. To create graph import files, set `INGESTION_MODE=knowledge_graph`.
 
 ## Test the full dataset

@@ -4,12 +4,13 @@ A small Python pipeline that reconstructs a complete NORA user interaction from 
 
 ## What it does
 
-1. Reads a chat document by `id`.
-2. Extracts its `cid` values.
-3. Reads tool history for each `cid` and extracts `run_id` values.
-4. Reads related context and feedback.
-5. Writes a readable interaction CSV and a complete JSONL audit log.
-6. Optionally writes either LLM-training JSONL or graph node/edge CSV files.
+1. Reads one chat document by `id`, or every chat with `--all`.
+2. Extracts the chat `cid` values.
+3. Reads both context containers by `cid`.
+4. Extracts `run_id` values from both context containers and reads any additional matching context.
+5. Reads feedback by `cid`.
+6. Writes a readable interaction CSV and a complete JSONL audit log.
+7. Optionally writes either LLM-training JSONL or graph node/edge CSV files.
 
 Authentication uses `DefaultAzureCredential`; Cosmos account keys are not stored.
 
@@ -36,6 +37,8 @@ Copy-Item .env.example .env
 az login
 python app.py "5638529c-2db7-45fe-8c2f-5dcfd46778c8"
 ```
+
+For a trial dataset run, set `BATCH_LIMIT=10` in `.env` and run `python app.py --all`. Set `BATCH_LIMIT=0` only when ready to process every chat.
 
 The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
