@@ -5,16 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NORA Interaction Viewer</title>
   <style>
-    :root { color-scheme: light; --ink:#17202a; --muted:#68727d; --line:#dce2e8; --paper:#fff; --wash:#f4f7f9; --brand:#155e75; --accent:#0891b2; --bad:#b42318; }
+    :root { color-scheme:light; --ink:#17202a; --muted:#68727d; --line:#dce2e8; --paper:#fff; --wash:#f4f7f9; --brand:#155e75; --accent:#0891b2; --bad:#b42318; }
     * { box-sizing:border-box; }
-    body { margin:0; background:var(--wash); color:var(--ink); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    body { margin:0; background:var(--wash); color:var(--ink); font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
     header { background:linear-gradient(120deg,#0f3d4c,#155e75); color:#fff; padding:28px max(24px,calc((100vw - 1440px)/2)); }
-    header h1 { margin:0 0 5px; font-size:25px; } header p { margin:0; color:#d7eef4; }
+    header h1 { margin:0 0 5px; font-size:25px; }
+    header p { margin:0; color:#d7eef4; }
     .toolbar { max-width:1440px; margin:18px auto; padding:0 24px; display:grid; grid-template-columns:minmax(260px,1fr) 2fr auto; gap:12px; }
-    .pick, input, select, button { border:1px solid var(--line); border-radius:9px; background:var(--paper); padding:10px 12px; font:inherit; }
+    .pick,input,select,button { border:1px solid var(--line); border-radius:9px; background:var(--paper); padding:10px 12px; font:inherit; }
     .pick { cursor:pointer; text-align:center; color:var(--brand); font-weight:650; border-style:dashed; border-color:var(--accent); }
-    .pick input { display:none; } input:focus,select:focus,button:focus,.pick:focus-within { outline:3px solid #a5e5f2; outline-offset:1px; }
-    button { cursor:pointer; } button:hover { border-color:var(--accent); }
+    .pick input { display:none; }
+    input:focus,select:focus,button:focus,.pick:focus-within { outline:3px solid #a5e5f2; outline-offset:1px; }
+    button { cursor:pointer; }
+    button:hover { border-color:var(--accent); }
     main { max-width:1440px; margin:auto; padding:0 24px 40px; display:grid; grid-template-columns:300px minmax(0,1fr); gap:18px; }
     aside,.content,.empty { background:var(--paper); border:1px solid var(--line); border-radius:12px; min-height:500px; }
     aside { overflow:auto; max-height:calc(100vh - 155px); position:sticky; top:12px; }
@@ -25,13 +28,18 @@
     .content { padding:20px; min-width:0; }
     .empty { grid-column:1/-1; display:grid; place-content:center; text-align:center; padding:40px; color:var(--muted); border-style:dashed; }
     .empty strong { color:var(--ink); font-size:18px; }
+    .loading { display:grid; gap:8px; min-width:320px; }
+    progress { width:100%; height:14px; }
     .title-row { display:flex; gap:15px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; }
-    h2 { margin:0; font-size:20px; overflow-wrap:anywhere; } h3 { margin:24px 0 10px; font-size:16px; text-transform:capitalize; }
-    .meta,.hint { color:var(--muted); } .stats { display:flex; gap:7px; flex-wrap:wrap; }
+    h2 { margin:0; font-size:20px; overflow-wrap:anywhere; }
+    h3 { margin:24px 0 10px; font-size:16px; text-transform:capitalize; }
+    .meta,.hint { color:var(--muted); }
+    .stats { display:flex; gap:7px; flex-wrap:wrap; }
     .pill { border-radius:999px; background:#eef3f5; padding:4px 9px; white-space:nowrap; }
     .record { border:1px solid var(--line); border-radius:10px; margin:10px 0; overflow:hidden; }
     .record-head { padding:11px 13px; background:#fafcfd; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
-    .record-head strong { overflow-wrap:anywhere; } .record-head .spacer { flex:1; }
+    .record-head strong { overflow-wrap:anywhere; }
+    .record-head .spacer { flex:1; }
     .summary { padding:13px; display:grid; gap:9px; }
     .field { display:grid; grid-template-columns:minmax(110px,180px) minmax(0,1fr); gap:12px; }
     .field-name { color:var(--muted); font-weight:650; overflow-wrap:anywhere; }
@@ -42,11 +50,12 @@
     .chat-role { display:inline-block; margin-bottom:7px; border-radius:999px; padding:3px 8px; font-size:11px; font-weight:750; letter-spacing:.04em; background:#e9f7fa; color:var(--brand); }
     .chat-message.assistant .chat-role { background:#eef3f5; color:#39434d; }
     .chat-content { white-space:pre-wrap; overflow-wrap:anywhere; }
-    details { border-top:1px solid var(--line); } summary { cursor:pointer; padding:10px 13px; color:var(--brand); font-weight:650; }
+    details { border-top:1px solid var(--line); }
+    summary { cursor:pointer; padding:10px 13px; color:var(--brand); font-weight:650; }
     pre { margin:0; padding:14px; background:#102027; color:#d7edf2; overflow:auto; max-height:520px; font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace; }
     .error { color:var(--bad); padding:12px max(24px,calc((100vw - 1440px)/2)); background:#feeceb; display:none; }
     mark { background:#ffe08a; padding:0 1px; }
-    @media (max-width:800px) { .toolbar { grid-template-columns:1fr; } main { grid-template-columns:1fr; } aside { position:static; max-height:260px; min-height:0; } }
+    @media (max-width:800px) { .toolbar{grid-template-columns:1fr;} main{grid-template-columns:1fr;} aside{position:static;max-height:260px;min-height:0;} }
   </style>
 </head>
 <body>
@@ -60,27 +69,172 @@
   <main id="app"><div class="empty"><strong>Choose the generated interactions.csv</strong><span>Everything stays in your browser; no data is uploaded.</span></div></main>
 <script>
 (() => {
-  const sourceLabels = {chat_history:'Chat history',tool_history:'Tool history',context_history:'Context history (Agent)',feedback:'Feedback'};
-  const preferred = ['agent','function_name','function_arguments','function_result','user_content','user_message','query','issue','assistant_content','assistant_response','response','content','message','tool_name','name','arguments','result','error','rating','feedback','comment','created_at','timestamp','status'];
-  const state = { groups:[], selected:null, query:'', source:'' };
-  const app = document.querySelector('#app'), error = document.querySelector('#error'), search = document.querySelector('#search'), source = document.querySelector('#source');
-  document.querySelector('#file').addEventListener('change', async e => { const file=e.target.files[0]; if(!file)return; try{load(parseCSV(await file.text()));error.style.display='none';}catch(ex){showError(ex.message);} });
-  search.addEventListener('input',e=>{state.query=e.target.value.trim().toLowerCase();render();}); source.addEventListener('change',e=>{state.source=e.target.value;render();});
-  function parseCSV(text){text=text.replace(/^\uFEFF/,'');const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(quoted){if(c==='"'&&text[i+1]==='"'){cell+='"';i++;}else if(c==='"')quoted=false;else cell+=c;}else if(c==='"')quoted=true;else if(c===','){row.push(cell);cell='';}else if(c==='\n'){row.push(cell.replace(/\r$/,''));if(row.some(v=>v!==''))rows.push(row);row=[];cell='';}else cell+=c;}if(quoted)throw new Error('The CSV ends inside a quoted value. It may be incomplete.');if(cell||row.length){row.push(cell.replace(/\r$/,''));rows.push(row);}if(!rows.length)throw new Error('The selected CSV is empty.');const headers=rows.shift().map(h=>h.trim());for(const required of ['interaction_id','source','data'])if(!headers.includes(required))throw new Error(`Missing required column: ${required}`);return rows.map(values=>Object.fromEntries(headers.map((h,i)=>[h,values[i]??'']))).map((r,n)=>{try{r.parsed=JSON.parse(r.data);}catch{r.parsed=null;r.jsonError=`Invalid JSON on CSV row ${n+2}`;}return r;});}
-  function load(rows){const map=new Map();for(const row of rows){const id=row.interaction_id||'(missing interaction ID)';if(!map.has(id))map.set(id,[]);map.get(id).push(row);}state.groups=[...map].map(([id,records])=>({id,records,haystack:(id+' '+records.map(r=>r.data).join(' ')).toLowerCase()}));state.selected=state.groups[0]?.id;search.disabled=source.disabled=false;const sources=[...new Set(rows.map(r=>r.source).filter(Boolean))];source.innerHTML='<option value="">All sources</option>'+sources.map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s]||s)}</option>`).join('');render();}
-  function render(){const visible=state.groups.filter(g=>!state.query||g.haystack.includes(state.query)).filter(g=>!state.source||g.records.some(r=>r.source===state.source));if(!visible.length){app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try a broader search or source filter.</span></div>';return;}if(!visible.some(g=>g.id===state.selected))state.selected=visible[0].id;const active=visible.find(g=>g.id===state.selected);app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===active.id?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.records.length} source record${g.records.length===1?'':'s'}</small></button>`).join('')}</aside><section class="content">${renderGroup(active)}</section>`;app.querySelectorAll('.interaction').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;render();});}
-  function renderGroup(group){const records=group.records.filter(r=>!state.source||r.source===state.source);const counts={};group.records.forEach(r=>counts[r.source]=(counts[r.source]||0)+1);const sections=[...new Set(records.map(r=>r.source))].map(type=>`<h3>${esc(sourceLabels[type]||type)} <span class="pill">${records.filter(r=>r.source===type).length}</span></h3>${records.filter(r=>r.source===type).map(renderRecord).join('')}`).join('');return `<div class="title-row"><div><h2>${highlight(group.id)}</h2><div class="meta">${group.records.length} total source records</div></div><div class="stats">${Object.entries(counts).map(([k,v])=>`<span class="pill">${esc(sourceLabels[k]||k)}: ${v}</span>`).join('')}</div></div>${sections}`;}
-  function renderRecord(row){const id=row.record_id||row.parsed?.id||'Record';const meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);let body='';if(row.parsed){if(row.source==='chat_history'&&Array.isArray(row.parsed.messages))body=renderChatMessages(row.parsed.messages);else if(row.source==='context_history')body=renderContextHistory(row.parsed);else if(row.source==='tool_history')body=renderToolHistory(row.parsed);else if(row.source==='feedback')body=renderFeedback(row.parsed);else{const fields=meaningfulFields(row.parsed);body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>';}}else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(row.parsed?JSON.stringify(row.parsed,null,2):row.data)}</pre></details></article>`;}
-  function renderChatMessages(messages){const items=messages.map(message=>{const role=String(message?.type||message?.data?.type||'message').toLowerCase();const content=message?.data?.content??message?.content??'';if(content===''||content===null||content===undefined)return'';const roleLabel=role==='user'?'USER':role==='assistant'?'ASSISTANT':role.toUpperCase();const roleClass=role==='assistant'?' assistant':'';return `<div class="chat-message${roleClass}"><span class="chat-role">${esc(roleLabel)}</span><div class="chat-content">${highlight(display(content))}</div></div>`;}).filter(Boolean);return items.length?`<div class="chat-thread">${items.join('')}</div>`:'<span class="hint">No chat message content found. Expand the complete JSON below.</span>';}
+  const sourceLabels={chat_history:'Chat history',tool_history:'Tool history',context_history:'Context history (Agent)',feedback:'Feedback'};
+  const preferred=['agent','function_name','function_arguments','function_result','user_content','user_message','query','issue','assistant_content','assistant_response','response','content','message','tool_name','name','arguments','result','error','rating','feedback','comment','created_at','timestamp','status'];
+  const state={groups:[],selected:null,query:'',source:''};
+  const app=document.querySelector('#app'),error=document.querySelector('#error'),search=document.querySelector('#search'),source=document.querySelector('#source'),fileInput=document.querySelector('#file');
+
+  fileInput.addEventListener('change',async e=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    search.disabled=source.disabled=true;
+    error.style.display='none';
+    showLoading(file,0);
+    try{
+      const rows=await parseCSVFile(file,p=>showLoading(file,p));
+      load(rows);
+    }catch(ex){
+      showError(ex?.message||String(ex));
+      app.innerHTML='<div class="empty"><strong>Could not load the CSV</strong><span>Choose the file again after checking the message above.</span></div>';
+    }
+  });
+  search.addEventListener('input',e=>{state.query=e.target.value.trim().toLowerCase();render();});
+  source.addEventListener('change',e=>{state.source=e.target.value;render();});
+
+  function showLoading(file,percent){
+    const mb=(file.size/1024/1024).toFixed(1);
+    app.innerHTML=`<div class="empty"><div class="loading"><strong>Loading ${esc(file.name)}</strong><span>${mb} MB · ${percent}% read</span><progress max="100" value="${percent}"></progress><span>Large CSVs are read in chunks to reduce browser memory usage.</span></div></div>`;
+  }
+
+  async function parseCSVFile(file,onProgress){
+    const headers=[];
+    const rows=[];
+    let row=[],cell='',quoted=false,pendingQuote=false,headerReady=false,bytesRead=0,lastProgress=-1;
+    const decoder=new TextDecoder('utf-8');
+    const reader=file.stream().getReader();
+
+    const finishRow=()=>{
+      row.push(cell.replace(/\r$/,''));
+      cell='';
+      if(!row.some(v=>v!=='')){row=[];return;}
+      if(!headerReady){
+        row[0]=row[0].replace(/^\uFEFF/,'');
+        headers.push(...row.map(h=>h.trim()));
+        for(const required of ['interaction_id','source','data']) if(!headers.includes(required)) throw new Error(`Missing required column: ${required}`);
+        headerReady=true;
+      }else{
+        const record={};
+        for(let i=0;i<headers.length;i++)record[headers[i]]=row[i]??'';
+        rows.push(record);
+      }
+      row=[];
+    };
+
+    const consume=(text,final=false)=>{
+      for(let i=0;i<text.length;i++){
+        const c=text[i];
+        if(pendingQuote){
+          if(c==='"'){cell+='"';pendingQuote=false;continue;}
+          quoted=false;pendingQuote=false;
+        }
+        if(quoted){
+          if(c==='"')pendingQuote=true;
+          else cell+=c;
+        }else if(c==='"')quoted=true;
+        else if(c===','){row.push(cell);cell='';}
+        else if(c==='\n')finishRow();
+        else cell+=c;
+      }
+      if(final){
+        if(pendingQuote){quoted=false;pendingQuote=false;}
+        if(quoted)throw new Error('The CSV ends inside a quoted value. It may be incomplete.');
+        if(cell||row.length)finishRow();
+      }
+    };
+
+    while(true){
+      const {value,done}=await reader.read();
+      if(done)break;
+      bytesRead+=value.byteLength;
+      consume(decoder.decode(value,{stream:true}));
+      const p=Math.min(99,Math.floor(bytesRead/file.size*100));
+      if(p!==lastProgress){lastProgress=p;onProgress?.(p);await new Promise(requestAnimationFrame);}
+    }
+    consume(decoder.decode(),true);
+    onProgress?.(100);
+    if(!headerReady)throw new Error('The selected CSV has no header row.');
+    if(!rows.length)throw new Error('The CSV has a header but no interaction records.');
+    return rows;
+  }
+
+  function load(rows){
+    const map=new Map();
+    for(const row of rows){const id=row.interaction_id||'(missing interaction ID)';if(!map.has(id))map.set(id,[]);map.get(id).push(row);}
+    state.groups=[...map].map(([id,records])=>({id,records}));
+    state.selected=state.groups[0]?.id;
+    search.disabled=source.disabled=false;
+    const sources=[...new Set(rows.map(r=>r.source).filter(Boolean))];
+    source.innerHTML='<option value="">All sources</option>'+sources.map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s]||s)}</option>`).join('');
+    rows.length=0;
+    render();
+  }
+
+  function groupMatches(g){
+    if(!state.query)return true;
+    if(g.id.toLowerCase().includes(state.query))return true;
+    return g.records.some(r=>(r.data||'').toLowerCase().includes(state.query)||(r.record_id||'').toLowerCase().includes(state.query)||(r.cid||'').toLowerCase().includes(state.query)||(r.run_id||'').toLowerCase().includes(state.query));
+  }
+
+  function render(){
+    const visible=state.groups.filter(groupMatches).filter(g=>!state.source||g.records.some(r=>r.source===state.source));
+    if(!visible.length){app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try a broader search or source filter.</span></div>';return;}
+    if(!visible.some(g=>g.id===state.selected))state.selected=visible[0].id;
+    const active=visible.find(g=>g.id===state.selected);
+    app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===active.id?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.records.length} source record${g.records.length===1?'':'s'}</small></button>`).join('')}</aside><section class="content">${renderGroup(active)}</section>`;
+    app.querySelectorAll('.interaction').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;render();});
+  }
+
+  function renderGroup(group){
+    const records=group.records.filter(r=>!state.source||r.source===state.source),counts={};
+    group.records.forEach(r=>counts[r.source]=(counts[r.source]||0)+1);
+    const sections=[...new Set(records.map(r=>r.source))].map(type=>`<h3>${esc(sourceLabels[type]||type)} <span class="pill">${records.filter(r=>r.source===type).length}</span></h3>${records.filter(r=>r.source===type).map(renderRecord).join('')}`).join('');
+    return `<div class="title-row"><div><h2>${highlight(group.id)}</h2><div class="meta">${group.records.length} total source records</div></div><div class="stats">${Object.entries(counts).map(([k,v])=>`<span class="pill">${esc(sourceLabels[k]||k)}: ${v}</span>`).join('')}</div></div>${sections}`;
+  }
+
+  function parseRowJSON(row){
+    if(Object.prototype.hasOwnProperty.call(row,'parsed'))return row.parsed;
+    try{row.parsed=JSON.parse(row.data);row.jsonError='';}
+    catch{row.parsed=null;row.jsonError='Invalid JSON in this CSV record';}
+    return row.parsed;
+  }
+
+  function renderRecord(row){
+    const parsed=parseRowJSON(row),id=row.record_id||parsed?.id||'Record',meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);
+    let body='';
+    if(parsed){
+      if(row.source==='chat_history'&&Array.isArray(parsed.messages))body=renderChatMessages(parsed.messages);
+      else if(row.source==='context_history')body=renderContextHistory(parsed);
+      else if(row.source==='tool_history')body=renderToolHistory(parsed);
+      else if(row.source==='feedback')body=renderFeedback(parsed);
+      else{const fields=meaningfulFields(parsed);body=fields.length?fields.map(([k,v])=>fieldHTML(label(k),v)).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>';}
+    }else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;
+    return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(parsed?JSON.stringify(parsed,null,2):row.data)}</pre></details></article>`;
+  }
+
+  function renderChatMessages(messages){
+    const items=messages.map(message=>{const role=String(message?.type||message?.data?.type||'message').toLowerCase(),content=message?.data?.content??message?.content??'';if(!isUseful(content))return'';const roleLabel=role==='user'?'USER':role==='assistant'?'ASSISTANT':role.toUpperCase(),roleClass=role==='assistant'?' assistant':'';return `<div class="chat-message${roleClass}"><span class="chat-role">${esc(roleLabel)}</span><div class="chat-content">${highlight(display(content))}</div></div>`;}).filter(Boolean);
+    return items.length?`<div class="chat-thread">${items.join('')}</div>`:'<span class="hint">No chat message content found. Expand the complete JSON below.</span>';
+  }
+
   function renderContextHistory(record){return renderFields([['Agent',record.agent],['Function name',record.function_name],['Function arguments',record.function_arguments],['Function result',record.function_result]].filter(([,v])=>isUseful(v)),'No agent/function summary fields found. Expand the complete JSON below.');}
   function renderToolHistory(record){return renderFields([['Function name',record.function_name],['Arguments',record.arguments],['Function result',record.function_result],['Error',record.error]].filter(([,v])=>isUseful(v)),'No tool summary fields found. Expand the complete JSON below.');}
-  function renderFeedback(record){const fields=[['User',record.uid],['Impacted device type',record.impacted_device_type],['Impacted device',record.impacted_device],['Metric',record.metric_name],['Team',record.team_name]].filter(([,v])=>isUseful(v));const feedbackItems=Array.isArray(record.feedbacks)?record.feedbacks:[];feedbackItems.forEach((item,index)=>{const prefix=feedbackItems.length>1?`Feedback ${index+1} `:'';[[`${prefix}RCA type`,item?.rca_type],[`${prefix}RCA feedback`,item?.rca_feedback],[`${prefix}Resolution type`,item?.resolution_type],[`${prefix}Resolution`,item?.resolution],[`${prefix}Feedback date`,formatFeedbackDate(item?.feedback_date)],[`${prefix}Feedback review comment`,item?.feedback_review_comment],[`${prefix}Review status`,item?.review_status],[`${prefix}Review category`,item?.review_category],[`${prefix}Review sub category`,item?.review_sub_category],[`${prefix}Updated by`,item?.updated_by],[`${prefix}Defect type`,item?.defect_type],[`${prefix}Severity`,item?.severity],[`${prefix}Dev owner`,item?.dev_owner],[`${prefix}Status`,item?.status],[`${prefix}Date resolved`,item?.date_resolved]].forEach(field=>{if(isUseful(field[1]))fields.push(field);});});const negative=record.negative_feedbacks??record.negative_feedback;if(negative&&typeof negative==='object'){[['Negative feedback gap type',negative.gap_type],['Negative feedback confidence score',negative.confidence_score],['Negative feedback reasoning',negative.reasoning],['Negative feedback criticality',negative.criticality],['Negative feedback not defect',negative.not_defect],['Negative feedback comments',negative.comments]].forEach(field=>{if(isUseful(field[1]))fields.push(field);});}return renderFields(fields,'No feedback summary fields found. Expand the complete JSON below.');}
-  function formatFeedbackDate(value){if(value===null||value===undefined||value==='')return value;const number=Number(value);if(!Number.isFinite(number))return value;const milliseconds=number<100000000000?number*1000:number;const date=new Date(milliseconds);return Number.isNaN(date.getTime())?value:date.toLocaleString();}
-  function renderFields(fields,emptyMessage){return fields.length?fields.map(([name,value])=>`<div class="field"><div class="field-name">${esc(name)}</div><div class="value">${highlight(display(value))}</div></div>`).join(''):`<span class="hint">${esc(emptyMessage)}</span>`;}
+
+  function renderFeedback(record){
+    const fields=[['User',record.uid],['Impacted device type',record.impacted_device_type],['Impacted device',record.impacted_device],['Metric',record.metric_name],['Team',record.team_name]].filter(([,v])=>isUseful(v));
+    const feedbackItems=Array.isArray(record.feedbacks)?record.feedbacks:[];
+    feedbackItems.forEach((item,index)=>{const prefix=feedbackItems.length>1?`Feedback ${index+1} `:'';[[`${prefix}RCA type`,item?.rca_type],[`${prefix}RCA feedback`,item?.rca_feedback],[`${prefix}Resolution type`,item?.resolution_type],[`${prefix}Resolution`,item?.resolution],[`${prefix}Feedback date`,formatFeedbackDate(item?.feedback_date)],[`${prefix}Feedback review comment`,item?.feedback_review_comment],[`${prefix}Review status`,item?.review_status],[`${prefix}Review category`,item?.review_category],[`${prefix}Review sub category`,item?.review_sub_category],[`${prefix}Updated by`,item?.updated_by],[`${prefix}Defect type`,item?.defect_type],[`${prefix}Severity`,item?.severity],[`${prefix}Dev owner`,item?.dev_owner],[`${prefix}Status`,item?.status],[`${prefix}Date resolved`,item?.date_resolved]].forEach(field=>{if(isUseful(field[1]))fields.push(field);});});
+    const negative=record.negative_feedbacks??record.negative_feedback;
+    if(negative&&typeof negative==='object'){[['Negative feedback gap type',negative.gap_type],['Negative feedback confidence score',negative.confidence_score],['Negative feedback reasoning',negative.reasoning],['Negative feedback criticality',negative.criticality],['Negative feedback not defect',negative.not_defect],['Negative feedback comments',negative.comments]].forEach(field=>{if(isUseful(field[1]))fields.push(field);});}
+    return renderFields(fields,'No feedback summary fields found. Expand the complete JSON below.');
+  }
+
+  function formatFeedbackDate(value){if(value===null||value===undefined||value==='')return value;const number=Number(value);if(!Number.isFinite(number))return value;const milliseconds=number<100000000000?number*1000:number,date=new Date(milliseconds);return Number.isNaN(date.getTime())?value:date.toLocaleString();}
+  function fieldHTML(name,value){return `<div class="field"><div class="field-name">${esc(name)}</div><div class="value">${highlight(display(value))}</div></div>`;}
+  function renderFields(fields,emptyMessage){return fields.length?fields.map(([name,value])=>fieldHTML(name,value)).join(''):`<span class="hint">${esc(emptyMessage)}</span>`;}
   function meaningfulFields(value){const found=new Map();walk(value,'',found);const ranked=[...found].sort((a,b)=>{const ai=preferred.indexOf(a[0].split('.').pop()),bi=preferred.indexOf(b[0].split('.').pop());return(ai<0?999:ai)-(bi<0?999:bi);});return ranked.slice(0,14);}
   function walk(value,path,out){if(out.size>60)return;if(Array.isArray(value)){value.slice(0,20).forEach((v,i)=>walk(v,`${path}[${i}]`,out));return;}if(value&&typeof value==='object'){for(const[k,v]of Object.entries(value)){const p=path?`${path}.${k}`:k;if(preferred.includes(k)&&isUseful(v)&&!out.has(p))out.set(p,v);walk(v,p,out);}}}
-  function isUseful(v){return v!==null&&v!==''&&(!(Array.isArray(v))||v.length)&&(!(typeof v==='object'&&!Array.isArray(v))||Object.keys(v).length);}
-  function display(v){if(typeof v==='string')return v;return JSON.stringify(v,null,2);}
+  function isUseful(v){return v!==null&&v!==undefined&&v!==''&&(!(Array.isArray(v))||v.length)&&(!(typeof v==='object'&&!Array.isArray(v))||Object.keys(v).length);}
+  function display(v){return typeof v==='string'?v:JSON.stringify(v,null,2);}
   function label(path){return path.replace(/\[(\d+)\]/g,' #$1').split('.').map(x=>x.replace(/_/g,' ')).join(' › ');}
   function highlight(value){const safe=esc(String(value??''));if(!state.query)return safe;const q=esc(state.query).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');return safe.replace(new RegExp(`(${q})`,'ig'),'<mark>$1</mark>');}
   function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
