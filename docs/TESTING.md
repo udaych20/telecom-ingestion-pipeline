@@ -25,6 +25,8 @@ python -m py_compile app.py
 - `BATCH_LIMIT=0`, a positive limit, and single-ID behavior.
 - Batch boundaries for fewer than, exactly, and more than `BATCH_SIZE` IDs.
 - Complete-only mode exports all four sources and skips every incomplete combination.
+- Coverage rows contain exact record counts, match flags, referenced-container counts, and complete/incomplete status.
+- Coverage summary percentages exclude failed CIDs and handle an empty analyzed set.
 - Batch processing continues after one interaction fails.
 
 ### Integration cases

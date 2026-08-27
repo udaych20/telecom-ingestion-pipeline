@@ -6,7 +6,7 @@ The pipeline gathers records belonging to one customer interaction from multiple
 
 ## Inputs and outputs
 
-Input: one message CID, `--all` for every distinct `chat_history.messages[].data.cid`, or `--all-complete` for only four-source interactions. Dataset CIDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
+Input: one message CID, `--all` for every distinct `chat_history.messages[].data.cid`, `--all-complete` for only four-source interactions, or `--all-report` for every interaction plus relationship coverage metrics. Dataset CIDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
 
 Outputs:
 
@@ -18,20 +18,31 @@ Outputs:
 | `graph_nodes.csv` | `INGESTION_MODE=knowledge_graph` | Graph nodes |
 | `graph_edges.csv` | `INGESTION_MODE=knowledge_graph` | Graph relationships |
 | `failed_interactions.csv` | When an ID fails | Interaction ID and error message |
+| `interaction_coverage.csv` | `--all-report` | Per-CID source record counts and relationship flags |
+| `coverage_summary.csv` | `--all-report` | Spreadsheet-friendly aggregate coverage metrics |
+| `coverage_summary.json` | `--all-report` | Aggregate cross-container coverage metrics |
 
 ## Container relationship
 
 ```text
-chat-history-uat.messages[].data.cid --> chat-feedback.feedbacks[].cid_list
+chat-history-uat.messages[].data.cid
         |
-        | matched by cid
-        +----------------> context-history-all-tools.cid
+        | same value as run_id
+        v
+context-history-uat.run_id
         |
-        | yields run_id
-        `----------------> context-history-uat.run_id
+        | provides run_id values
+        v
+context-history-all-tools.run_id
+
+chat-history-uat.messages[].data.cid
+        |
+        | contained in feedbacks[].cid_list
+        v
+chat-feedback
 ```
 
-The message CID is matched to `context-history-all-tools.cid` and nested feedback CID lists. Run IDs are extracted from matching all-tools records and used to query `context-history-uat.run_id`. Duplicate documents are removed by document `id`.
+The implementation uses the message CID to query `context-history-uat.run_id`. Run IDs recursively found in those context records query `context-history-all-tools.run_id`. Feedback documents match through nested `feedbacks[].cid_list`. Duplicate documents are removed by document `id`.
 
 ## Scope
 

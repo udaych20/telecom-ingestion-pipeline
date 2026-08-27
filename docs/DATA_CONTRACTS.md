@@ -5,13 +5,19 @@
 | Container | Required link | Observed content |
 |---|---|---|
 | Chat history | `messages[].data.cid` | User content, assistant response, conversation details |
-| Context history — all tools | `cid` matches message CID; provides `run_id` | Function name, arguments, result, error |
-| Context history — UAT | `run_id` matches an all-tools run ID | Agent/tool execution context |
+| Context history — UAT | `run_id` matches the message CID; provides run IDs | Agent/tool execution context |
+| Context history — all tools | `run_id` matches a run ID found in UAT context | Function name, arguments, result, error |
 | Chat feedback | `feedbacks[].cid_list` contains chat `cid` | User feedback and review details |
 
 Fields may be nested. The script recursively searches for `cid`, `run_id`, and supported text fields.
 
-The message CID queries `context-history-all-tools.cid`. Run IDs from those matches query `context-history-uat.run_id`. Feedback matches when a nested `feedbacks[].cid_list` contains the message CID. Results are de-duplicated by document `id`.
+The message CID queries `context-history-uat.run_id`. Run IDs recursively found in those matches query `context-history-all-tools.run_id`. Feedback matches when a nested `feedbacks[].cid_list` contains the message CID. Results are de-duplicated by document `id`.
+
+## Coverage reports
+
+`interaction_coverage.csv` has one row per successfully analyzed chat CID. It records source-document counts, Boolean match flags, the number of referenced containers matched (zero through three), and whether all four containers are present.
+
+`coverage_summary.csv` and `coverage_summary.json` aggregate those rows. The CSV is intended for direct review in a spreadsheet; the JSON also records the exact join path. Failed CIDs are counted separately and are excluded from coverage percentages because their relationships could not be fully evaluated. All coverage files are overwritten by each `--all-report` run.
 
 ## Complete interaction object
 

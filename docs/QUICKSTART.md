@@ -45,3 +45,19 @@ python app.py --all-complete
 ```
 
 Incomplete interactions are skipped and are not written to output or the failure CSV.
+
+## Analyze relationship coverage
+
+To export every discovered chat CID, including interactions with missing related data, and create coverage reports:
+
+```powershell
+python app.py --all-report
+```
+
+The run writes:
+
+- `interaction_coverage.csv`: one row per successfully analyzed CID, with record counts and match flags for all four containers.
+- `coverage_summary.csv`: spreadsheet-friendly totals, complete and incomplete counts, per-container coverage, and relationship distribution.
+- `coverage_summary.json`: the same aggregate metrics with the evaluated join path included for auditability.
+
+These two report files are replaced on each `--all-report` run so their metrics describe that run only. The normal interaction exports remain append-only.

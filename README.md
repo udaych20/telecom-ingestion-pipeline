@@ -42,6 +42,8 @@ For a trial dataset run, set `BATCH_LIMIT=10` in `.env` and run `python app.py -
 
 To export only fully joined interactions, run `python app.py --all-complete`. It writes an interaction only when chat, all-tools context, UAT context, and feedback are all present. Incomplete interactions are skipped.
 
+To export every chat interaction and measure cross-container coverage, run `python app.py --all-report`. In addition to the normal interaction exports, this writes per-CID counts to `output/interaction_coverage.csv` and aggregate coverage metrics to both `output/coverage_summary.csv` and `output/coverage_summary.json`.
+
 The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
 ## Current limitation

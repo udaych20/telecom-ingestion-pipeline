@@ -270,6 +270,117 @@ def log_failure(interaction_id, error):
     append_csv(path, ["interaction_id", "error"], [(interaction_id, str(error))])
 
 
+def interaction_coverage(interaction):
+    counts = {
+        "chat_history": len(interaction["chat_history"]),
+        "context_history": len(interaction["context_history"]),
+        "tool_history": len(interaction["tool_history"]),
+        "feedback": len(interaction["feedback"]),
+    }
+    referenced_sources = ("context_history", "tool_history", "feedback")
+    return {
+        "interaction_id": interaction["interaction_id"],
+        "chat_history_records": counts["chat_history"],
+        "context_history_records": counts["context_history"],
+        "tool_history_records": counts["tool_history"],
+        "feedback_records": counts["feedback"],
+        "has_context_history": int(counts["context_history"] > 0),
+        "has_tool_history": int(counts["tool_history"] > 0),
+        "has_feedback": int(counts["feedback"] > 0),
+        "referenced_container_count": sum(counts[name] > 0 for name in referenced_sources),
+        "complete_all_four_containers": int(all(counts.values())),
+    }
+
+
+def build_coverage_summary(rows, failed):
+    analyzed = len(rows)
+    source_metrics = {}
+    for source in ("chat_history", "context_history", "tool_history", "feedback"):
+        count_field = f"{source}_records"
+        matched = sum(row[count_field] > 0 for row in rows)
+        source_metrics[source] = {
+            "cids_with_match": matched,
+            "cids_without_match": analyzed - matched,
+            "coverage_percent": round((matched / analyzed * 100), 2) if analyzed else 0.0,
+            "total_records": sum(row[count_field] for row in rows),
+        }
+
+    distribution = {
+        str(reference_count): sum(
+            row["referenced_container_count"] == reference_count for row in rows
+        )
+        for reference_count in range(4)
+    }
+    complete = sum(row["complete_all_four_containers"] for row in rows)
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "join_path": {
+            "chat_history": "messages[].data.cid = chat CID",
+            "context_history": "run_id = chat CID",
+            "tool_history": "run_id in run IDs found in matching context history",
+            "feedback": "feedbacks[].cid_list contains chat CID",
+        },
+        "distinct_chat_cids_attempted": analyzed + failed,
+        "distinct_chat_cids_analyzed": analyzed,
+        "failed_cids": failed,
+        "complete_all_four_containers": complete,
+        "incomplete_interactions": analyzed - complete,
+        "complete_coverage_percent": round((complete / analyzed * 100), 2) if analyzed else 0.0,
+        "cids_by_referenced_container_count": distribution,
+        "sources": source_metrics,
+    }
+
+
+def write_coverage_reports(rows, failed):
+    detail_path = os.path.join(OUTPUT_DIR, "interaction_coverage.csv")
+    fields = [
+        "interaction_id",
+        "chat_history_records",
+        "context_history_records",
+        "tool_history_records",
+        "feedback_records",
+        "has_context_history",
+        "has_tool_history",
+        "has_feedback",
+        "referenced_container_count",
+        "complete_all_four_containers",
+    ]
+    with open(detail_path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    summary = build_coverage_summary(rows, failed)
+    summary_path = os.path.join(OUTPUT_DIR, "coverage_summary.json")
+    with open(summary_path, "w", encoding="utf-8") as file:
+        json.dump(summary, file, ensure_ascii=False, indent=2)
+        file.write("\n")
+
+    summary_csv_path = os.path.join(OUTPUT_DIR, "coverage_summary.csv")
+    summary_rows = [
+        ("overall", "distinct_chat_cids_attempted", summary["distinct_chat_cids_attempted"]),
+        ("overall", "distinct_chat_cids_analyzed", summary["distinct_chat_cids_analyzed"]),
+        ("overall", "failed_cids", summary["failed_cids"]),
+        ("overall", "complete_all_four_containers", summary["complete_all_four_containers"]),
+        ("overall", "incomplete_interactions", summary["incomplete_interactions"]),
+        ("overall", "complete_coverage_percent", summary["complete_coverage_percent"]),
+    ]
+    for source, metrics in summary["sources"].items():
+        for metric, value in metrics.items():
+            summary_rows.append((source, metric, value))
+    for reference_count, count in summary["cids_by_referenced_container_count"].items():
+        summary_rows.append((
+            "relationship_distribution",
+            f"cids_matching_{reference_count}_of_3_referenced_containers",
+            count,
+        ))
+    with open(summary_csv_path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["section", "metric", "value"])
+        writer.writerows(summary_rows)
+    return summary
+
+
 def process_batch(database, interaction_ids):
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_id = {
@@ -286,7 +397,7 @@ def process_batch(database, interaction_ids):
 
 if __name__ == "__main__":
     if not ENDPOINT or len(sys.argv) != 2:
-        print("Usage: python app.py <chat-id> | --all | --all-complete | --timestamps")
+        print("Usage: python app.py <chat-id> | --all | --all-complete | --all-report | --timestamps")
         print("Set COSMOS_ENDPOINT and optionally COSMOS_DATABASE first.")
         raise SystemExit(1)
     if BATCH_LIMIT < 0 or BATCH_SIZE < 1 or MAX_WORKERS < 1:
@@ -303,8 +414,9 @@ if __name__ == "__main__":
         credential.close()
         raise SystemExit(0)
 
-    all_mode = sys.argv[1] in ("--all", "--all-complete")
+    all_mode = sys.argv[1] in ("--all", "--all-complete", "--all-report")
     complete_only = sys.argv[1] == "--all-complete"
+    report_mode = sys.argv[1] == "--all-report"
     if all_mode:
         print_container_timestamps(database)
     batches = get_chat_id_batches(database) if all_mode else [[sys.argv[1]]]
@@ -313,6 +425,7 @@ if __name__ == "__main__":
     success = 0
     skipped = 0
     failed = 0
+    coverage_rows = []
     for batch_number, interaction_ids in enumerate(batches, start=1):
         batch_success = 0
         batch_skipped = 0
@@ -334,6 +447,9 @@ if __name__ == "__main__":
                         missing_counts[source] += 1
                 continue
 
+            if report_mode:
+                coverage_rows.append(interaction_coverage(interaction))
+
             # Writes stay on the main thread so concurrent workers never write
             # to the same CSV/JSONL files at the same time.
             save_interaction(interaction)
@@ -344,6 +460,15 @@ if __name__ == "__main__":
         if complete_only:
             missing = ", ".join(f"missing_{name}={count}" for name, count in missing_counts.items())
             print(f"Batch {batch_number}: complete={batch_success}, skipped={batch_skipped}, {missing}")
+
+    if report_mode:
+        summary = write_coverage_reports(coverage_rows, failed)
+        print(
+            "Coverage report: "
+            f"analyzed={summary['distinct_chat_cids_analyzed']}, "
+            f"complete={summary['complete_all_four_containers']}, "
+            f"incomplete={summary['incomplete_interactions']}"
+        )
 
     client.close()
     credential.close()
