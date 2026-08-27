@@ -32,6 +32,8 @@
     .content { padding:20px; min-width:0; }
     .empty { grid-column:1/-1; display:grid; place-content:center; text-align:center; padding:40px; color:var(--muted); border-style:dashed; }
     .empty strong { color:var(--ink); font-size:18px; }
+    .loading { display:grid; gap:8px; min-width:320px; }
+    progress { width:100%; height:14px; }
     .title-row { display:flex; gap:15px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; }
     h2 { margin:0; font-size:20px; overflow-wrap:anywhere; } h3 { margin:24px 0 10px; font-size:16px; text-transform:capitalize; }
     .meta,.hint { color:var(--muted); } .stats { display:flex; gap:7px; flex-wrap:wrap; }
@@ -87,31 +89,43 @@
 
   document.querySelector('#file').addEventListener('change', async e => {
     const files = [...e.target.files]; if (!files.length) return;
-    try { await loadFiles(files); error.style.display='none'; }
-    catch (ex) { showError(ex.message); }
+    search.disabled=source.disabled=relationship.disabled=true; error.style.display='none';
+    try { await loadFiles(files); }
+    catch (ex) { showError(ex?.message||String(ex)); app.innerHTML='<div class="empty"><strong>Could not load the CSV files</strong><span>Choose the files again after checking the message above.</span></div>'; }
   });
   search.addEventListener('input', e => { state.query=e.target.value.trim().toLowerCase(); render(); });
   source.addEventListener('change', e => { state.source=e.target.value; render(); });
   relationship.addEventListener('change', e => { state.relationship=e.target.value; render(); });
 
-  function parseCSV(text) {
-    text=text.replace(/^\uFEFF/,''); const rows=[]; let row=[], cell='', quoted=false;
-    for (let i=0;i<text.length;i++) { const c=text[i];
-      if (quoted) { if (c==='"' && text[i+1]==='"') { cell+='"'; i++; } else if(c==='"') quoted=false; else cell+=c; }
-      else if(c==='"') quoted=true; else if(c===',') { row.push(cell); cell=''; }
-      else if(c==='\n') { row.push(cell.replace(/\r$/,'')); if(row.some(v=>v!=='')) rows.push(row); row=[]; cell=''; }
-      else cell+=c;
-    }
-    if (quoted) throw new Error('The CSV ends inside a quoted value. It may be incomplete.');
-    if (cell || row.length) { row.push(cell.replace(/\r$/,'')); rows.push(row); }
-    if (!rows.length) throw new Error('The selected CSV is empty.');
-    const headers=rows.shift().map(h=>h.trim());
-    return {headers,rows:rows.map(values => Object.fromEntries(headers.map((h,i)=>[h,values[i]??''])))};
+  function showLoading(file,percent,index,total) {
+    const mb=(file.size/1024/1024).toFixed(1);
+    app.innerHTML=`<div class="empty"><div class="loading"><strong>Loading ${esc(file.name)}</strong><span>File ${index} of ${total} · ${mb} MB · ${percent}% read</span><progress max="100" value="${percent}"></progress><span>Large CSVs are read in chunks to reduce browser memory usage.</span></div></div>`;
+  }
+  async function parseCSVFile(file,onProgress) {
+    const headers=[],rows=[]; let row=[],cell='',quoted=false,pendingQuote=false,headerReady=false,bytesRead=0,lastProgress=-1;
+    const decoder=new TextDecoder('utf-8'),reader=file.stream().getReader();
+    const finishRow=()=>{
+      row.push(cell.replace(/\r$/,'')); cell=''; if(!row.some(v=>v!=='')){row=[];return;}
+      if(!headerReady){row[0]=row[0].replace(/^\uFEFF/,'');headers.push(...row.map(h=>h.trim()));headerReady=true;}
+      else{const record={};for(let i=0;i<headers.length;i++)record[headers[i]]=row[i]??'';rows.push(record);} row=[];
+    };
+    const consume=(text,final=false)=>{
+      for(let i=0;i<text.length;i++){const c=text[i];
+        if(pendingQuote){if(c==='"'){cell+='"';pendingQuote=false;continue;}quoted=false;pendingQuote=false;}
+        if(quoted){if(c==='"')pendingQuote=true;else cell+=c;}
+        else if(c==='"')quoted=true;else if(c===','){row.push(cell);cell='';}else if(c==='\n')finishRow();else cell+=c;
+      }
+      if(final){if(pendingQuote){quoted=false;pendingQuote=false;}if(quoted)throw new Error('The CSV ends inside a quoted value. It may be incomplete.');if(cell||row.length)finishRow();}
+    };
+    while(true){const {value,done}=await reader.read();if(done)break;bytesRead+=value.byteLength;consume(decoder.decode(value,{stream:true}));const p=Math.min(99,Math.floor(bytesRead/file.size*100));if(p!==lastProgress){lastProgress=p;onProgress?.(p);await new Promise(requestAnimationFrame);}}
+    consume(decoder.decode(),true);onProgress?.(100);
+    if(!headerReady)throw new Error(`${file.name} has no header row.`);if(!rows.length)throw new Error(`${file.name} has a header but no records.`);
+    return {headers,rows};
   }
   async function loadFiles(files) {
     let interactionRows=[], coverageRows=[], summaryRows=[];
-    for(const file of files) { const parsed=parseCSV(await file.text()), h=parsed.headers;
-      if(['interaction_id','source','data'].every(x=>h.includes(x))) interactionRows.push(...parsed.rows.map((r,n)=>{try{r.parsed=JSON.parse(r.data);}catch{r.parsed=null;r.jsonError=`Invalid JSON in ${file.name}, row ${n+2}`;}return r;}));
+    for(let index=0;index<files.length;index++) { const file=files[index],parsed=await parseCSVFile(file,p=>showLoading(file,p,index+1,files.length)),h=parsed.headers;
+      if(['interaction_id','source','data'].every(x=>h.includes(x))) interactionRows.push(...parsed.rows);
       else if(h.includes('interaction_id')&&h.includes('complete_all_four_containers')) coverageRows.push(...parsed.rows);
       else if(['section','metric','value'].every(x=>h.includes(x))) summaryRows.push(...parsed.rows);
       else throw new Error(`${file.name} is not one of the supported report CSV files.`);
@@ -121,17 +135,21 @@
   function load(rows) {
     const map=new Map(); for(const row of rows) { const id=row.interaction_id||'(missing interaction ID)'; if(!map.has(id)) map.set(id,[]); map.get(id).push(row); }
     for(const id of state.coverage.keys()) if(!map.has(id)) map.set(id,[]);
-    state.groups=[...map].map(([id,records])=>({id,records,coverage:state.coverage.get(id),haystack:(id+' '+records.map(r=>r.data).join(' ')).toLowerCase()}));
+    state.groups=[...map].map(([id,records])=>({id,records,coverage:state.coverage.get(id)}));
     state.selected=state.groups[0]?.id; search.disabled=source.disabled=false; relationship.disabled=!state.coverage.size;
     source.innerHTML='<option value="">All sources</option>'+Object.keys(sourceLabels).map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s])}</option>`).join(''); renderDashboard(); render();
   }
   function render() {
-    const visible=state.groups.filter(g=>!state.query||g.haystack.includes(state.query)).filter(g=>!state.source||g.records.some(r=>r.source===state.source)||Number(g.coverage?.[`${state.source}_records`])>0).filter(g=>matchesRelationship(g.coverage));
+    const visible=state.groups.filter(groupMatches).filter(g=>!state.source||g.records.some(r=>r.source===state.source)||Number(g.coverage?.[`${state.source}_records`])>0).filter(g=>matchesRelationship(g.coverage));
     if(!visible.length) { app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try a broader search or source filter.</span></div>'; return; }
     if(!visible.some(g=>g.id===state.selected)) state.selected=visible[0].id;
     const active=visible.find(g=>g.id===state.selected);
     app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===active.id?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.coverage?`${g.coverage.referenced_container_count}/3 relationships · `:''}${g.records.length} exported records</small></button>`).join('')}</aside><section class="content">${renderGroup(active)}</section>`;
     app.querySelectorAll('.interaction').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;render();});
+  }
+  function groupMatches(group) {
+    if(!state.query)return true;if(group.id.toLowerCase().includes(state.query))return true;
+    return group.records.some(r=>(r.data||'').toLowerCase().includes(state.query)||(r.record_id||'').toLowerCase().includes(state.query)||(r.cid||'').toLowerCase().includes(state.query)||(r.run_id||'').toLowerCase().includes(state.query));
   }
   function matchesRelationship(row) {
     if(!state.relationship) return true; if(!row) return false;
@@ -163,11 +181,12 @@
     dashboard.style.display='block';
   }
   function renderRecord(row) {
-    const id=row.record_id||row.parsed?.id||'Record'; const meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);
-    let body=''; if(row.parsed) { const fields=meaningfulFields(row.parsed); body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>'; }
+    const parsed=parseRowJSON(row),id=row.record_id||parsed?.id||'Record'; const meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);
+    let body=''; if(parsed) { const fields=meaningfulFields(parsed); body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>'; }
     else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;
-    return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(row.parsed?JSON.stringify(row.parsed,null,2):row.data)}</pre></details></article>`;
+    return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(parsed?JSON.stringify(parsed,null,2):row.data)}</pre></details></article>`;
   }
+  function parseRowJSON(row) { if(Object.prototype.hasOwnProperty.call(row,'parsed'))return row.parsed;try{row.parsed=JSON.parse(row.data);row.jsonError='';}catch{row.parsed=null;row.jsonError='Invalid JSON in this CSV record';}return row.parsed; }
   function meaningfulFields(value) {
     const found=new Map(); walk(value,'',found); const ranked=[...found].sort((a,b)=>{ const ai=preferred.indexOf(a[0].split('.').pop()),bi=preferred.indexOf(b[0].split('.').pop()); return (ai<0?999:ai)-(bi<0?999:bi); }); return ranked.slice(0,14);
   }
