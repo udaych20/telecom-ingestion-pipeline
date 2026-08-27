@@ -30,6 +30,13 @@
     .empty strong { color:var(--ink); font-size:18px; }
     .loading { display:grid; gap:8px; min-width:320px; }
     progress { width:100%; height:14px; }
+    .feedback-overview { max-width:1440px; margin:0 auto 18px; padding:0 24px; display:none; }
+    .feedback-cards { display:grid; grid-template-columns:repeat(4,minmax(150px,1fr)); gap:12px; }
+    .feedback-card { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:15px; }
+    .feedback-card strong { display:block; font-size:25px; color:var(--brand); }
+    .feedback-card span { color:var(--muted); }
+    .feedback-card.positive strong { color:#176b3a; }
+    .feedback-card.negative strong { color:var(--bad); }
     .title-row { display:flex; gap:15px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; }
     h2 { margin:0; font-size:20px; overflow-wrap:anywhere; }
     h3 { margin:24px 0 10px; font-size:16px; text-transform:capitalize; }
@@ -55,7 +62,7 @@
     pre { margin:0; padding:14px; background:#102027; color:#d7edf2; overflow:auto; max-height:520px; font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace; }
     .error { color:var(--bad); padding:12px max(24px,calc((100vw - 1440px)/2)); background:#feeceb; display:none; }
     mark { background:#ffe08a; padding:0 1px; }
-    @media (max-width:800px) { .toolbar{grid-template-columns:1fr;} main{grid-template-columns:1fr;} aside{position:static;max-height:260px;min-height:0;} }
+    @media (max-width:800px) { .toolbar{grid-template-columns:1fr;} .feedback-cards{grid-template-columns:1fr 1fr;} main{grid-template-columns:1fr;} aside{position:static;max-height:260px;min-height:0;} }
   </style>
 </head>
 <body>
@@ -66,13 +73,14 @@
     <input id="search" type="search" placeholder="Search IDs, messages, tools, feedback…" disabled>
     <select id="source" disabled aria-label="Filter by source"><option value="">All sources</option></select>
   </section>
+  <section id="feedback-overview" class="feedback-overview"></section>
   <main id="app"><div class="empty"><strong>Choose the generated interactions.csv</strong><span>Everything stays in your browser; no data is uploaded.</span></div></main>
 <script>
 (() => {
   const sourceLabels={chat_history:'Chat history',tool_history:'Tool history',context_history:'Context history (Agent)',feedback:'Feedback'};
   const preferred=['agent','function_name','function_arguments','function_result','user_content','user_message','query','issue','assistant_content','assistant_response','response','content','message','tool_name','name','arguments','result','error','rating','feedback','comment','created_at','timestamp','status'];
   const state={groups:[],selected:null,query:'',source:''};
-  const app=document.querySelector('#app'),error=document.querySelector('#error'),search=document.querySelector('#search'),source=document.querySelector('#source'),fileInput=document.querySelector('#file');
+  const app=document.querySelector('#app'),feedbackOverview=document.querySelector('#feedback-overview'),error=document.querySelector('#error'),search=document.querySelector('#search'),source=document.querySelector('#source'),fileInput=document.querySelector('#file');
 
   fileInput.addEventListener('change',async e=>{
     const file=e.target.files[0];
@@ -165,9 +173,30 @@
     search.disabled=source.disabled=false;
     const sources=[...new Set(rows.map(r=>r.source).filter(Boolean))];
     source.innerHTML='<option value="">All sources</option>'+sources.map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s]||s)}</option>`).join('');
+    renderFeedbackOverview(rows);
     rows.length=0;
     render();
   }
+
+  function renderFeedbackOverview(rows){
+    const seen=new Set(),positiveCids=new Set(),negativeCids=new Set();let documents=0,positive=0,negative=0;
+    for(const row of rows){
+      if(row.source!=='feedback')continue;
+      const key=`${row.interaction_id}|${row.record_id||hashText(row.data||'')}`;
+      if(seen.has(key))continue;seen.add(key);documents++;
+      const record=parseRowJSON(row);if(!record)continue;
+      const positiveValue=record.positive_feedbacks??record.positive_feedback??record.feedbacks;
+      const negativeValue=record.negative_feedbacks??record.negative_feedback;
+      const positiveItems=countFeedbackEntries(positiveValue),negativeItems=countFeedbackEntries(negativeValue);
+      positive+=positiveItems;negative+=negativeItems;
+      if(positiveItems)positiveCids.add(row.interaction_id);if(negativeItems)negativeCids.add(row.interaction_id);
+    }
+    feedbackOverview.innerHTML=`<div class="feedback-cards"><div class="feedback-card positive"><strong>${positive.toLocaleString()}</strong><span>Positive feedback entries · ${positiveCids.size.toLocaleString()} CIDs</span></div><div class="feedback-card negative"><strong>${negative.toLocaleString()}</strong><span>Negative feedback entries · ${negativeCids.size.toLocaleString()} CIDs</span></div><div class="feedback-card"><strong>${documents.toLocaleString()}</strong><span>Unique feedback documents</span></div><div class="feedback-card"><strong>${seen.size?((positive/(positive+negative||1))*100).toFixed(1):'0.0'}%</strong><span>Positive share of classified entries</span></div></div>`;
+    feedbackOverview.style.display=documents?'block':'none';
+  }
+
+  function countFeedbackEntries(value){if(Array.isArray(value))return value.filter(isUseful).length;return value&&typeof value==='object'&&Object.keys(value).length?1:0;}
+  function hashText(value){let hash=2166136261;for(let i=0;i<value.length;i++){hash^=value.charCodeAt(i);hash=Math.imul(hash,16777619);}return(hash>>>0).toString(16);}
 
   function groupMatches(g){
     if(!state.query)return true;
