@@ -459,7 +459,7 @@ def process_batch(database, interaction_ids):
 
 if __name__ == "__main__":
     if not ENDPOINT or len(sys.argv) != 2:
-        print("Usage: python app.py <chat-id> | --all | --all-complete | --all-report | --timestamps")
+        print("Usage: python app.py <chat-id> | --all | --all-complete | --all-report | --coverage-only | --timestamps")
         print("Set COSMOS_ENDPOINT and optionally COSMOS_DATABASE first.")
         raise SystemExit(1)
     if BATCH_LIMIT < 0 or BATCH_SIZE < 1 or MAX_WORKERS < 1:
@@ -476,9 +476,10 @@ if __name__ == "__main__":
         credential.close()
         raise SystemExit(0)
 
-    all_mode = sys.argv[1] in ("--all", "--all-complete", "--all-report")
+    all_mode = sys.argv[1] in ("--all", "--all-complete", "--all-report", "--coverage-only")
     complete_only = sys.argv[1] == "--all-complete"
-    report_mode = sys.argv[1] == "--all-report"
+    report_mode = sys.argv[1] in ("--all-report", "--coverage-only")
+    export_interactions = sys.argv[1] != "--coverage-only"
     completed_ids = set()
     resumed = False
     if all_mode:
@@ -531,7 +532,8 @@ if __name__ == "__main__":
 
             # Writes stay on the main thread so concurrent workers never write
             # to the same CSV/JSONL files at the same time.
-            save_interaction(interaction)
+            if export_interactions:
+                save_interaction(interaction)
             if report_mode:
                 append_coverage_row(coverage_row)
                 coverage_rows.append(coverage_row)

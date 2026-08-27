@@ -44,6 +44,8 @@ To export only fully joined interactions, run `python app.py --all-complete`. It
 
 To export every chat interaction and measure cross-container coverage, run `python app.py --all-report`. In addition to the normal interaction exports, this writes per-CID counts to `output/interaction_coverage.csv` and aggregate coverage metrics to both `output/coverage_summary.csv` and `output/coverage_summary.json`.
 
+To calculate the same full-dataset metrics without creating another large `interactions.csv`, run `python app.py --coverage-only`. It queries and correlates all four containers but writes only the compact coverage reports.
+
 Open `interactions-viewer.html` in a browser and select `interactions.csv`, `interaction_coverage.csv`, and `coverage_summary.csv` together to view the complete dashboard and drill into each CID. The files are processed locally in the browser.
 
 Dataset commands automatically checkpoint completed CIDs in `output/`. If a run is interrupted or has failures, rerun the same command and it resumes without querying completed CIDs again. The checkpoint is removed after a failure-free completion.

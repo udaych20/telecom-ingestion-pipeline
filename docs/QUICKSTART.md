@@ -48,6 +48,14 @@ Incomplete interactions are skipped and are not written to output or the failure
 
 ## Analyze relationship coverage
 
+To calculate container metrics without creating the potentially very large interaction exports:
+
+```powershell
+python app.py --coverage-only
+```
+
+This still queries and correlates all four containers for every discovered chat CID, but writes only the compact coverage files. This is the recommended command when the immediate goal is data analysis.
+
 To export every discovered chat CID, including interactions with missing related data, and create coverage reports:
 
 ```powershell
@@ -64,7 +72,7 @@ The coverage report files are replaced on each `--all-report` run so their metri
 
 ## Resume an interrupted run
 
-`--all`, `--all-complete`, and `--all-report` save a progress checkpoint after every successfully handled CID. If the process stops, run the exact same command again. Completed CIDs are skipped, while failed or unfinished CIDs are retried. Report coverage accumulated before the interruption is retained.
+`--all`, `--all-complete`, `--all-report`, and `--coverage-only` save a progress checkpoint after every successfully handled CID. If the process stops, run the exact same command again. Completed CIDs are skipped, while failed or unfinished CIDs are retried. Report coverage accumulated before the interruption is retained.
 
 The checkpoint is deleted automatically after a failure-free run. If failures remain, its path is printed and it is kept for the next retry. Because output and checkpoint writes cannot be one atomic Cosmos transaction, a shutdown occurring in the tiny interval between those writes can repeat at most the in-flight CID in the append-only interaction output.
 

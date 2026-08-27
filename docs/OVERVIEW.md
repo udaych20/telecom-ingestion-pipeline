@@ -6,7 +6,7 @@ The pipeline gathers records belonging to one customer interaction from multiple
 
 ## Inputs and outputs
 
-Input: one message CID, `--all` for every distinct `chat_history.messages[].data.cid`, `--all-complete` for only four-source interactions, or `--all-report` for every interaction plus relationship coverage metrics. Dataset CIDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
+Input: one message CID, `--all` for every distinct `chat_history.messages[].data.cid`, `--all-complete` for only four-source interactions, `--all-report` for every interaction plus relationship coverage metrics, or `--coverage-only` for metrics without the large interaction export. Dataset CIDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
 
 Outputs:
 
@@ -18,9 +18,9 @@ Outputs:
 | `graph_nodes.csv` | `INGESTION_MODE=knowledge_graph` | Graph nodes |
 | `graph_edges.csv` | `INGESTION_MODE=knowledge_graph` | Graph relationships |
 | `failed_interactions.csv` | When an ID fails | Interaction ID and error message |
-| `interaction_coverage.csv` | `--all-report` | Per-CID source record counts and relationship flags |
-| `coverage_summary.csv` | `--all-report` | Spreadsheet-friendly aggregate coverage metrics |
-| `coverage_summary.json` | `--all-report` | Aggregate cross-container coverage metrics |
+| `interaction_coverage.csv` | Report modes | Per-CID source record counts and relationship flags |
+| `coverage_summary.csv` | Report modes | Spreadsheet-friendly aggregate coverage metrics |
+| `coverage_summary.json` | Report modes | Aggregate cross-container coverage metrics |
 
 ## Container relationship
 
