@@ -27,6 +27,8 @@ python -m py_compile app.py
 - Complete-only mode exports all four sources and skips every incomplete combination.
 - Coverage rows contain exact record counts, match flags, referenced-container counts, and complete/incomplete status.
 - Coverage summary percentages exclude failed CIDs and handle an empty analyzed set.
+- Progress checkpoints round-trip completed IDs and are removed after successful completion.
+- Resume skips completed CIDs without extending the configured `BATCH_LIMIT` window.
 - Batch processing continues after one interaction fails.
 
 ### Integration cases

@@ -62,6 +62,12 @@ The run writes:
 
 The coverage report files are replaced on each `--all-report` run so their metrics describe that run only. The normal interaction exports remain append-only.
 
+## Resume an interrupted run
+
+`--all`, `--all-complete`, and `--all-report` save a progress checkpoint after every successfully handled CID. If the process stops, run the exact same command again. Completed CIDs are skipped, while failed or unfinished CIDs are retried. Report coverage accumulated before the interruption is retained.
+
+The checkpoint is deleted automatically after a failure-free run. If failures remain, its path is printed and it is kept for the next retry. Because output and checkpoint writes cannot be one atomic Cosmos transaction, a shutdown occurring in the tiny interval between those writes can repeat at most the in-flight CID in the append-only interaction output.
+
 Open `interactions-viewer.html` and choose these three files together:
 
 - `output/interactions.csv`

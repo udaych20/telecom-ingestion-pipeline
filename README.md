@@ -46,6 +46,8 @@ To export every chat interaction and measure cross-container coverage, run `pyth
 
 Open `interactions-viewer.html` in a browser and select `interactions.csv`, `interaction_coverage.csv`, and `coverage_summary.csv` together to view the complete dashboard and drill into each CID. The files are processed locally in the browser.
 
+Dataset commands automatically checkpoint completed CIDs in `output/`. If a run is interrupted or has failures, rerun the same command and it resumes without querying completed CIDs again. The checkpoint is removed after a failure-free completion.
+
 The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
 ## Current limitation

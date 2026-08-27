@@ -205,7 +205,7 @@ def save_interaction(interaction):
         raise ValueError("INGESTION_MODE must be none, llm, or knowledge_graph")
 
 
-def get_chat_id_batches(database):
+def get_chat_id_batches(database, completed_ids=None):
     chat = database.get_container_client(CHAT_CONTAINER)
     sql = """
         SELECT message.data.cid AS cid, c._ts AS ts
@@ -218,6 +218,7 @@ def get_chat_id_batches(database):
     batch = []
     count = 0
     seen = set()
+    completed_ids = completed_ids or set()
     for row in rows:
         interaction_id = row.get("cid")
         if not interaction_id or interaction_id in seen:
@@ -225,8 +226,10 @@ def get_chat_id_batches(database):
         seen.add(interaction_id)
         if BATCH_LIMIT and count >= BATCH_LIMIT:
             break
-        batch.append(interaction_id)
         count += 1
+        if interaction_id in completed_ids:
+            continue
+        batch.append(interaction_id)
         if len(batch) == BATCH_SIZE:
             yield batch
             batch = []
@@ -268,6 +271,41 @@ def missing_containers(interaction):
 def log_failure(interaction_id, error):
     path = os.path.join(OUTPUT_DIR, "failed_interactions.csv")
     append_csv(path, ["interaction_id", "error"], [(interaction_id, str(error))])
+
+
+def checkpoint_path(command):
+    return os.path.join(OUTPUT_DIR, f"{command.lstrip('-')}_progress.json")
+
+
+def load_checkpoint(command):
+    path = checkpoint_path(command)
+    if not os.path.exists(path):
+        return set(), False
+    with open(path, encoding="utf-8") as file:
+        checkpoint = json.load(file)
+    if checkpoint.get("command") != command or not isinstance(checkpoint.get("completed_ids"), list):
+        raise ValueError(f"Invalid progress checkpoint: {path}")
+    return set(str(value) for value in checkpoint["completed_ids"]), True
+
+
+def save_checkpoint(command, completed_ids):
+    path = checkpoint_path(command)
+    temporary_path = f"{path}.tmp"
+    checkpoint = {
+        "command": command,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "completed_ids": sorted(completed_ids),
+    }
+    with open(temporary_path, "w", encoding="utf-8") as file:
+        json.dump(checkpoint, file, ensure_ascii=False, indent=2)
+        file.write("\n")
+    os.replace(temporary_path, path)
+
+
+def remove_checkpoint(command):
+    path = checkpoint_path(command)
+    if os.path.exists(path):
+        os.remove(path)
 
 
 def interaction_coverage(interaction):
@@ -381,6 +419,30 @@ def write_coverage_reports(rows, failed):
     return summary
 
 
+def append_coverage_row(row):
+    path = os.path.join(OUTPUT_DIR, "interaction_coverage.csv")
+    append_csv(path, list(row.keys()), [list(row.values())])
+
+
+def load_coverage_rows():
+    path = os.path.join(OUTPUT_DIR, "interaction_coverage.csv")
+    if not os.path.exists(path):
+        return []
+    with open(path, newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+    numeric_fields = (
+        "chat_history_records", "context_history_records", "tool_history_records",
+        "feedback_records", "has_context_history", "has_tool_history", "has_feedback",
+        "referenced_container_count", "complete_all_four_containers",
+    )
+    unique = {}
+    for row in rows:
+        for field in numeric_fields:
+            row[field] = int(row[field])
+        unique[row["interaction_id"]] = row
+    return list(unique.values())
+
+
 def process_batch(database, interaction_ids):
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_id = {
@@ -417,15 +479,30 @@ if __name__ == "__main__":
     all_mode = sys.argv[1] in ("--all", "--all-complete", "--all-report")
     complete_only = sys.argv[1] == "--all-complete"
     report_mode = sys.argv[1] == "--all-report"
+    completed_ids = set()
+    resumed = False
+    if all_mode:
+        completed_ids, resumed = load_checkpoint(sys.argv[1])
+        if resumed:
+            print(f"Resuming {sys.argv[1]}: {len(completed_ids)} CIDs already completed")
+        else:
+            save_checkpoint(sys.argv[1], completed_ids)
     if all_mode:
         print_container_timestamps(database)
-    batches = get_chat_id_batches(database) if all_mode else [[sys.argv[1]]]
+    batches = get_chat_id_batches(database, completed_ids) if all_mode else [[sys.argv[1]]]
 
     print(f"Parallel workers: {MAX_WORKERS}")
     success = 0
     skipped = 0
     failed = 0
-    coverage_rows = []
+    if report_mode and resumed:
+        coverage_rows = load_coverage_rows()
+        if completed_ids and not coverage_rows:
+            raise ValueError("Cannot resume report: interaction_coverage.csv is missing or empty")
+    else:
+        coverage_rows = []
+        if report_mode:
+            write_coverage_reports(coverage_rows, failed=0)
     for batch_number, interaction_ids in enumerate(batches, start=1):
         batch_success = 0
         batch_skipped = 0
@@ -445,14 +522,22 @@ if __name__ == "__main__":
                 for source in missing_containers(interaction):
                     if source in missing_counts:
                         missing_counts[source] += 1
+                completed_ids.add(interaction_id)
+                save_checkpoint(sys.argv[1], completed_ids)
                 continue
 
             if report_mode:
-                coverage_rows.append(interaction_coverage(interaction))
+                coverage_row = interaction_coverage(interaction)
 
             # Writes stay on the main thread so concurrent workers never write
             # to the same CSV/JSONL files at the same time.
             save_interaction(interaction)
+            if report_mode:
+                append_coverage_row(coverage_row)
+                coverage_rows.append(coverage_row)
+            if all_mode:
+                completed_ids.add(interaction_id)
+                save_checkpoint(sys.argv[1], completed_ids)
             success += 1
             batch_success += 1
             print(f"Processed {interaction_id}")
@@ -460,8 +545,12 @@ if __name__ == "__main__":
         if complete_only:
             missing = ", ".join(f"missing_{name}={count}" for name, count in missing_counts.items())
             print(f"Batch {batch_number}: complete={batch_success}, skipped={batch_skipped}, {missing}")
+        if report_mode:
+            coverage_rows = load_coverage_rows()
+            write_coverage_reports(coverage_rows, failed)
 
     if report_mode:
+        coverage_rows = load_coverage_rows()
         summary = write_coverage_reports(coverage_rows, failed)
         print(
             "Coverage report: "
@@ -469,6 +558,11 @@ if __name__ == "__main__":
             f"complete={summary['complete_all_four_containers']}, "
             f"incomplete={summary['incomplete_interactions']}"
         )
+
+    if all_mode and failed == 0:
+        remove_checkpoint(sys.argv[1])
+    elif all_mode:
+        print(f"Progress kept in {checkpoint_path(sys.argv[1])}; rerun the same command to retry failures")
 
     client.close()
     credential.close()

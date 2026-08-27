@@ -69,6 +69,30 @@ class CoverageReportTests(unittest.TestCase):
             self.assertIn("complete_coverage_percent", contents)
             self.assertIn("cids_matching_1_of_3_referenced_containers", contents)
 
+    def test_checkpoint_round_trip_and_removal(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            with patch.object(app, "OUTPUT_DIR", output_dir):
+                app.save_checkpoint("--all-report", {"cid-2", "cid-1"})
+                completed, resumed = app.load_checkpoint("--all-report")
+                self.assertTrue(resumed)
+                self.assertEqual(completed, {"cid-1", "cid-2"})
+                app.remove_checkpoint("--all-report")
+                self.assertEqual(app.load_checkpoint("--all-report"), (set(), False))
+
+    def test_batch_resume_skips_completed_ids_within_limit(self):
+        class Container:
+            def query_items(self, *_args, **_kwargs):
+                return [{"cid": "cid-1"}, {"cid": "cid-2"}, {"cid": "cid-3"}]
+
+        class Database:
+            def get_container_client(self, _name):
+                return Container()
+
+        with patch.object(app, "BATCH_LIMIT", 2), patch.object(app, "BATCH_SIZE", 100):
+            batches = list(app.get_chat_id_batches(Database(), {"cid-1"}))
+
+        self.assertEqual(batches, [["cid-2"]])
+
 
 if __name__ == "__main__":
     unittest.main()
