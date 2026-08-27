@@ -10,7 +10,7 @@
     body { margin:0; background:var(--wash); color:var(--ink); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
     header { background:linear-gradient(120deg,#0f3d4c,#155e75); color:#fff; padding:28px max(24px,calc((100vw - 1440px)/2)); }
     header h1 { margin:0 0 5px; font-size:25px; } header p { margin:0; color:#d7eef4; }
-    .toolbar { max-width:1440px; margin:18px auto; padding:0 24px; display:grid; grid-template-columns:minmax(260px,1fr) 2fr auto; gap:12px; }
+    .toolbar { max-width:1440px; margin:18px auto; padding:0 24px; display:grid; grid-template-columns:minmax(260px,1fr) minmax(220px,2fr) auto auto; gap:12px; }
     .pick, input, select, button { border:1px solid var(--line); border-radius:9px; background:var(--paper); padding:10px 12px; font:inherit; }
     .pick { cursor:pointer; text-align:center; color:var(--brand); font-weight:650; border-style:dashed; border-color:var(--accent); }
     .pick input { display:none; } input:focus,select:focus,button:focus,.pick:focus-within { outline:3px solid #a5e5f2; outline-offset:1px; }
@@ -57,6 +57,24 @@
     <label class="pick">Choose the 3 report CSV files<input id="file" type="file" accept=".csv,text/csv" multiple></label>
     <input id="search" type="search" placeholder="Search IDs, messages, tools, feedback…" disabled>
     <select id="source" disabled aria-label="Filter by source"><option value="">All sources</option></select>
+    <select id="relationship" disabled aria-label="Filter by relationship coverage">
+      <option value="">All relationship states</option>
+      <option value="complete">Complete: all 4 containers</option>
+      <option value="incomplete">Any incomplete interaction</option>
+      <option value="has:context">Has context (any combination)</option>
+      <option value="has:tools">Has tools (any combination)</option>
+      <option value="has:feedback">Has feedback (any combination)</option>
+      <option value="missing:context">Missing context</option>
+      <option value="missing:tools">Missing tools</option>
+      <option value="missing:feedback">Missing feedback</option>
+      <option value="none">Chat only: no references</option>
+      <option value="context">Context only</option>
+      <option value="tools">Tools only</option>
+      <option value="feedback">Feedback only</option>
+      <option value="context+tools">Context + tools only</option>
+      <option value="context+feedback">Context + feedback only</option>
+      <option value="tools+feedback">Tools + feedback only</option>
+    </select>
   </section>
   <section id="dashboard" class="dashboard"></section>
   <main id="app"><div class="empty"><strong>Choose interactions.csv, interaction_coverage.csv, and coverage_summary.csv</strong><span>You can also load any one of them by itself. Everything stays in your browser.</span></div></main>
@@ -64,8 +82,8 @@
 (() => {
   const sourceLabels = {chat_history:'Chat history',tool_history:'Tool history',context_history:'Context history',feedback:'Feedback'};
   const preferred = ['user_content','user_message','query','issue','assistant_content','assistant_response','response','content','message','function_name','tool_name','name','arguments','result','error','rating','feedback','comment','created_at','timestamp','status'];
-  const state = { groups:[], coverage:new Map(), summary:new Map(), selected:null, query:'', source:'' };
-  const app = document.querySelector('#app'), dashboard = document.querySelector('#dashboard'), error = document.querySelector('#error'), search = document.querySelector('#search'), source = document.querySelector('#source');
+  const state = { groups:[], coverage:new Map(), summary:new Map(), selected:null, query:'', source:'', relationship:'' };
+  const app = document.querySelector('#app'), dashboard = document.querySelector('#dashboard'), error = document.querySelector('#error'), search = document.querySelector('#search'), source = document.querySelector('#source'), relationship = document.querySelector('#relationship');
 
   document.querySelector('#file').addEventListener('change', async e => {
     const files = [...e.target.files]; if (!files.length) return;
@@ -74,6 +92,7 @@
   });
   search.addEventListener('input', e => { state.query=e.target.value.trim().toLowerCase(); render(); });
   source.addEventListener('change', e => { state.source=e.target.value; render(); });
+  relationship.addEventListener('change', e => { state.relationship=e.target.value; render(); });
 
   function parseCSV(text) {
     text=text.replace(/^\uFEFF/,''); const rows=[]; let row=[], cell='', quoted=false;
@@ -103,16 +122,26 @@
     const map=new Map(); for(const row of rows) { const id=row.interaction_id||'(missing interaction ID)'; if(!map.has(id)) map.set(id,[]); map.get(id).push(row); }
     for(const id of state.coverage.keys()) if(!map.has(id)) map.set(id,[]);
     state.groups=[...map].map(([id,records])=>({id,records,coverage:state.coverage.get(id),haystack:(id+' '+records.map(r=>r.data).join(' ')).toLowerCase()}));
-    state.selected=state.groups[0]?.id; search.disabled=source.disabled=false;
+    state.selected=state.groups[0]?.id; search.disabled=source.disabled=false; relationship.disabled=!state.coverage.size;
     source.innerHTML='<option value="">All sources</option>'+Object.keys(sourceLabels).map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s])}</option>`).join(''); renderDashboard(); render();
   }
   function render() {
-    const visible=state.groups.filter(g=>!state.query||g.haystack.includes(state.query)).filter(g=>!state.source||g.records.some(r=>r.source===state.source)||Number(g.coverage?.[`${state.source}_records`])>0);
+    const visible=state.groups.filter(g=>!state.query||g.haystack.includes(state.query)).filter(g=>!state.source||g.records.some(r=>r.source===state.source)||Number(g.coverage?.[`${state.source}_records`])>0).filter(g=>matchesRelationship(g.coverage));
     if(!visible.length) { app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try a broader search or source filter.</span></div>'; return; }
     if(!visible.some(g=>g.id===state.selected)) state.selected=visible[0].id;
     const active=visible.find(g=>g.id===state.selected);
     app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===active.id?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.coverage?`${g.coverage.referenced_container_count}/3 relationships · `:''}${g.records.length} exported records</small></button>`).join('')}</aside><section class="content">${renderGroup(active)}</section>`;
     app.querySelectorAll('.interaction').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;render();});
+  }
+  function matchesRelationship(row) {
+    if(!state.relationship) return true; if(!row) return false;
+    const context=Number(row.has_context_history)>0, tools=Number(row.has_tool_history)>0, feedback=Number(row.has_feedback)>0;
+    if(state.relationship==='complete') return context&&tools&&feedback;
+    if(state.relationship==='incomplete') return !(context&&tools&&feedback);
+    if(state.relationship.startsWith('has:')) return {context,tools,feedback}[state.relationship.slice(4)];
+    if(state.relationship.startsWith('missing:')) return !{context,tools,feedback}[state.relationship.slice(8)];
+    const exact=[context?'context':'',tools?'tools':'',feedback?'feedback':''].filter(Boolean).join('+')||'none';
+    return exact===state.relationship;
   }
   function renderGroup(group) {
     const records=group.records.filter(r=>!state.source||r.source===state.source); const counts={}; group.records.forEach(r=>counts[r.source]=(counts[r.source]||0)+1);

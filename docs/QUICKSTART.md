@@ -68,4 +68,4 @@ Open `interactions-viewer.html` and choose these three files together:
 - `output/interaction_coverage.csv`
 - `output/coverage_summary.csv`
 
-The dashboard shows aggregate coverage, per-container CID and record counts, per-CID relationship status, and the original readable interaction records. The viewer also works with any one of the files when only partial analysis is needed.
+The dashboard shows aggregate coverage, per-container CID and record counts, per-CID relationship status, and the original readable interaction records. Filters can select complete or incomplete interactions, any CID with or without a particular container match, or exact context/tools/feedback combinations. The viewer also works with any one of the files when only partial analysis is needed.
