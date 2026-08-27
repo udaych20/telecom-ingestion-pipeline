@@ -46,6 +46,14 @@ To export every chat interaction and measure cross-container coverage, run `pyth
 
 To calculate the same full-dataset metrics without creating another large `interactions.csv`, run `python app.py --coverage-only`. It queries and correlates all four containers but writes only the compact coverage reports.
 
+If `interactions.csv` already contains every interaction, calculate the reports without connecting to Cosmos:
+
+```powershell
+python csv_coverage_report.py output\interactions.csv
+```
+
+The CSV analyzer streams the source and uses a temporary disk-backed index, so it can process multi-gigabyte files without loading them into memory. It also de-duplicates repeated source records from append-only reruns.
+
 Open `interactions-viewer.html` in a browser and select `interactions.csv`, `interaction_coverage.csv`, and `coverage_summary.csv` together to view the complete dashboard and drill into each CID. The files are processed locally in the browser.
 
 Dataset commands automatically checkpoint completed CIDs in `output/`. If a run is interrupted or has failures, rerun the same command and it resumes without querying completed CIDs again. The checkpoint is removed after a failure-free completion.

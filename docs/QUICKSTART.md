@@ -48,6 +48,26 @@ Incomplete interactions are skipped and are not written to output or the failure
 
 ## Analyze relationship coverage
 
+### From an existing CSV without Cosmos
+
+If the existing `interactions.csv` was generated using `--all` or `--all-report`, create all coverage reports locally:
+
+```powershell
+python csv_coverage_report.py output\interactions.csv
+```
+
+This streams the CSV through a temporary SQLite index and writes the normal three coverage files. Repeated records with the same interaction ID, source, and record ID are counted once. When `record_id` is empty, identical JSON data is de-duplicated by content hash.
+
+The results describe only CIDs present in the CSV. A file created with `--all-complete` cannot measure missing relationships because incomplete CIDs were omitted from that export.
+
+To place the reports elsewhere:
+
+```powershell
+python csv_coverage_report.py D:\path\interactions.csv --output-dir D:\path\coverage-report
+```
+
+### Directly from Cosmos
+
 To calculate container metrics without creating the potentially very large interaction exports:
 
 ```powershell
