@@ -1,205 +1,64 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NORA Interaction Viewer</title>
-  <style>
-    :root { color-scheme: light; --ink:#17202a; --muted:#68727d; --line:#dce2e8; --paper:#fff; --wash:#f4f7f9; --brand:#155e75; --accent:#0891b2; --bad:#b42318; }
-    * { box-sizing:border-box; }
-    body { margin:0; background:var(--wash); color:var(--ink); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-    header { background:linear-gradient(120deg,#0f3d4c,#155e75); color:#fff; padding:28px max(24px,calc((100vw - 1440px)/2)); }
-    header h1 { margin:0 0 5px; font-size:25px; } header p { margin:0; color:#d7eef4; }
-    .toolbar { max-width:1440px; margin:18px auto; padding:0 24px; display:grid; grid-template-columns:minmax(260px,1fr) minmax(220px,2fr) auto auto; gap:12px; }
-    .pick, input, select, button { border:1px solid var(--line); border-radius:9px; background:var(--paper); padding:10px 12px; font:inherit; }
-    .pick { cursor:pointer; text-align:center; color:var(--brand); font-weight:650; border-style:dashed; border-color:var(--accent); }
-    .pick input { display:none; } input:focus,select:focus,button:focus,.pick:focus-within { outline:3px solid #a5e5f2; outline-offset:1px; }
-    button { cursor:pointer; } button:hover { border-color:var(--accent); }
-    .dashboard { max-width:1440px; margin:0 auto 18px; padding:0 24px; display:none; }
-    .cards { display:grid; grid-template-columns:repeat(4,minmax(150px,1fr)); gap:12px; margin-bottom:12px; }
-    .card,.coverage-panel { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:15px; }
-    .card strong { display:block; font-size:25px; color:var(--brand); } .card span { color:var(--muted); }
-    .coverage-grid { display:grid; grid-template-columns:repeat(4,minmax(150px,1fr)); gap:10px; }
-    .coverage-item { padding:10px; background:#f7fafb; border-radius:8px; }
-    .bar { height:7px; background:#dce6e9; border-radius:9px; margin-top:7px; overflow:hidden; } .bar i { display:block; height:100%; background:var(--accent); }
-    main { max-width:1440px; margin:auto; padding:0 24px 40px; display:grid; grid-template-columns:300px minmax(0,1fr); gap:18px; }
-    aside,.content,.empty { background:var(--paper); border:1px solid var(--line); border-radius:12px; min-height:500px; }
-    aside { overflow:auto; max-height:calc(100vh - 155px); position:sticky; top:12px; }
-    .aside-title { padding:14px 16px 8px; font-weight:700; }
-    .interaction { width:100%; border:0; border-radius:0; border-top:1px solid var(--line); text-align:left; padding:12px 16px; background:#fff; }
-    .interaction.active { background:#e9f7fa; box-shadow:inset 4px 0 var(--accent); }
-    .interaction small { display:block; color:var(--muted); margin-top:3px; }
-    .content { padding:20px; min-width:0; }
-    .empty { grid-column:1/-1; display:grid; place-content:center; text-align:center; padding:40px; color:var(--muted); border-style:dashed; }
-    .empty strong { color:var(--ink); font-size:18px; }
-    .loading { display:grid; gap:8px; min-width:320px; }
-    progress { width:100%; height:14px; }
-    .title-row { display:flex; gap:15px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; }
-    h2 { margin:0; font-size:20px; overflow-wrap:anywhere; } h3 { margin:24px 0 10px; font-size:16px; text-transform:capitalize; }
-    .meta,.hint { color:var(--muted); } .stats { display:flex; gap:7px; flex-wrap:wrap; }
-    .pill { border-radius:999px; background:#eef3f5; padding:4px 9px; white-space:nowrap; } .pill.good { background:#e5f6ec; color:#176b3a; } .pill.missing { background:#fff0ed; color:#9b2c20; }
-    .record { border:1px solid var(--line); border-radius:10px; margin:10px 0; overflow:hidden; }
-    .record-head { padding:11px 13px; background:#fafcfd; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
-    .record-head strong { overflow-wrap:anywhere; } .record-head .spacer { flex:1; }
-    .summary { padding:13px; display:grid; gap:9px; }
-    .field { display:grid; grid-template-columns:minmax(110px,180px) minmax(0,1fr); gap:12px; }
-    .field-name { color:var(--muted); font-weight:650; overflow-wrap:anywhere; }
-    .value { white-space:pre-wrap; overflow-wrap:anywhere; }
-    details { border-top:1px solid var(--line); } summary { cursor:pointer; padding:10px 13px; color:var(--brand); font-weight:650; }
-    pre { margin:0; padding:14px; background:#102027; color:#d7edf2; overflow:auto; max-height:520px; font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace; }
-    .error { color:var(--bad); padding:12px max(24px,calc((100vw - 1440px)/2)); background:#feeceb; display:none; }
-    mark { background:#ffe08a; padding:0 1px; }
-    @media (max-width:800px) { .toolbar { grid-template-columns:1fr; } .cards,.coverage-grid { grid-template-columns:1fr 1fr; } main { grid-template-columns:1fr; } aside { position:static; max-height:260px; min-height:0; } }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NORA Coverage & Interaction Viewer</title>
+<style>
+:root{--ink:#17202a;--muted:#68727d;--line:#dce2e8;--paper:#fff;--wash:#f4f7f9;--brand:#155e75;--accent:#0891b2;--bad:#b42318}*{box-sizing:border-box}body{margin:0;background:var(--wash);color:var(--ink);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}header{background:linear-gradient(120deg,#0f3d4c,#155e75);color:#fff;padding:28px max(24px,calc((100vw - 1440px)/2))}header h1{margin:0 0 5px;font-size:25px}header p{margin:0;color:#d7eef4}.toolbar,.dashboard,main{max-width:1440px;margin:auto;padding-left:24px;padding-right:24px}.toolbar{margin-top:18px;margin-bottom:18px;display:grid;grid-template-columns:2fr auto auto;gap:12px}input,select{border:1px solid var(--line);border-radius:9px;background:var(--paper);padding:10px 12px;font:inherit}.dashboard{margin-bottom:18px}.cards{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.card,.coverage-panel{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:15px}.card strong{display:block;font-size:25px;color:var(--brand)}.card span,.meta,.hint{color:var(--muted)}main{padding-bottom:40px;display:grid;grid-template-columns:320px minmax(0,1fr);gap:18px}aside,.content,.empty{background:var(--paper);border:1px solid var(--line);border-radius:12px;min-height:500px}aside{overflow:auto;max-height:calc(100vh - 155px);position:sticky;top:12px}.aside-title{padding:14px 16px 8px;font-weight:700}.interaction{width:100%;border:0;border-top:1px solid var(--line);text-align:left;padding:12px 16px;background:#fff;cursor:pointer}.interaction.active{background:#e9f7fa;box-shadow:inset 4px 0 var(--accent)}.interaction small{display:block;color:var(--muted);margin-top:3px}.content{padding:20px;min-width:0}.empty{grid-column:1/-1;display:grid;place-content:center;text-align:center;padding:40px;color:var(--muted);border-style:dashed}.empty strong{color:var(--ink);font-size:18px}.title-row{display:flex;gap:15px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}h2{margin:0;font-size:20px;overflow-wrap:anywhere}h3{margin:24px 0 10px;font-size:16px}.stats{display:flex;gap:7px;flex-wrap:wrap}.pill{border-radius:999px;background:#eef3f5;padding:4px 9px;white-space:nowrap}.pill.good{background:#e5f6ec;color:#176b3a}.pill.missing{background:#fff0ed;color:#9b2c20}.coverage-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px}.coverage-item{padding:10px;background:#f7fafb;border-radius:8px}.record{border:1px solid var(--line);border-radius:10px;margin:10px 0;overflow:hidden}.record-head{padding:11px 13px;background:#fafcfd;display:flex;align-items:center;gap:9px;flex-wrap:wrap}.record-head .spacer{flex:1}.summary{padding:13px;display:grid;gap:9px}.field{display:grid;grid-template-columns:minmax(110px,180px) minmax(0,1fr);gap:12px}.field-name{color:var(--muted);font-weight:650}.value{white-space:pre-wrap;overflow-wrap:anywhere}details{border-top:1px solid var(--line)}summary{cursor:pointer;padding:10px 13px;color:var(--brand);font-weight:650}pre{margin:0;padding:14px;background:#102027;color:#d7edf2;overflow:auto;max-height:520px;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.error{display:none;color:var(--bad);padding:12px max(24px,calc((100vw - 1440px)/2));background:#feeceb}.notice{max-width:1440px;margin:14px auto;padding:12px 24px;color:var(--brand)}mark{background:#ffe08a}@media(max-width:800px){.toolbar,.cards,.coverage-grid,main{grid-template-columns:1fr}aside{position:static;max-height:260px;min-height:0}}
+</style>
 </head>
 <body>
-  <header><h1>NORA Coverage & Interaction Viewer</h1><p>Explore overall relationship metrics and drill into the original records for each CID.</p></header>
-  <div id="error" class="error" role="alert"></div>
-  <section class="toolbar">
-    <label class="pick">Choose the 3 report CSV files<input id="file" type="file" accept=".csv,text/csv" multiple></label>
-    <input id="search" type="search" placeholder="Search IDs, messages, tools, feedback…" disabled>
-    <select id="source" disabled aria-label="Filter by source"><option value="">All sources</option></select>
-    <select id="relationship" disabled aria-label="Filter by relationship coverage">
-      <option value="">All relationship states</option>
-      <option value="complete">Complete: all 4 containers</option>
-      <option value="incomplete">Any incomplete interaction</option>
-      <option value="has:context">Has context (any combination)</option>
-      <option value="has:tools">Has tools (any combination)</option>
-      <option value="has:feedback">Has feedback (any combination)</option>
-      <option value="missing:context">Missing context</option>
-      <option value="missing:tools">Missing tools</option>
-      <option value="missing:feedback">Missing feedback</option>
-      <option value="none">Chat only: no references</option>
-      <option value="context">Context only</option>
-      <option value="tools">Tools only</option>
-      <option value="feedback">Feedback only</option>
-      <option value="context+tools">Context + tools only</option>
-      <option value="context+feedback">Context + feedback only</option>
-      <option value="tools+feedback">Tools + feedback only</option>
-    </select>
-  </section>
-  <section id="dashboard" class="dashboard"></section>
-  <main id="app"><div class="empty"><strong>Choose interactions.csv, interaction_coverage.csv, and coverage_summary.csv</strong><span>You can also load any one of them by itself. Everything stays in your browser.</span></div></main>
+<header><h1>NORA Coverage & Interaction Viewer</h1><p>Disk-backed viewer for very large interaction exports.</p></header>
+<div id="error" class="error"></div>
+<div id="notice" class="notice">Connecting to the local viewer index…</div>
+<section class="toolbar">
+<input id="search" type="search" placeholder="Search interaction/CID…" disabled>
+<select id="source" disabled><option value="">All sources</option><option value="chat_history">Chat history</option><option value="context_history">Context history</option><option value="tool_history">Tool history</option><option value="feedback">Feedback</option></select>
+<select id="relationship" disabled><option value="">All relationship states</option><option value="complete">Complete: all 4 containers</option><option value="incomplete">Incomplete</option><option value="missing:context">Missing context</option><option value="missing:tools">Missing tools</option><option value="missing:feedback">Missing feedback</option></select>
+</section>
+<section id="dashboard" class="dashboard"></section>
+<main id="app"><div class="empty"><strong>Starting viewer…</strong><span>The 4 GB CSV stays on disk. Only the selected interaction is loaded into the browser.</span></div></main>
 <script>
-(() => {
-  const sourceLabels = {chat_history:'Chat history',tool_history:'Tool history',context_history:'Context history',feedback:'Feedback'};
-  const preferred = ['user_content','user_message','query','issue','assistant_content','assistant_response','response','content','message','function_name','tool_name','name','arguments','result','error','rating','feedback','comment','created_at','timestamp','status'];
-  const state = { groups:[], coverage:new Map(), summary:new Map(), selected:null, query:'', source:'', relationship:'' };
-  const app = document.querySelector('#app'), dashboard = document.querySelector('#dashboard'), error = document.querySelector('#error'), search = document.querySelector('#search'), source = document.querySelector('#source'), relationship = document.querySelector('#relationship');
-
-  document.querySelector('#file').addEventListener('change', async e => {
-    const files = [...e.target.files]; if (!files.length) return;
-    search.disabled=source.disabled=relationship.disabled=true; error.style.display='none';
-    try { await loadFiles(files); }
-    catch (ex) { showError(ex?.message||String(ex)); app.innerHTML='<div class="empty"><strong>Could not load the CSV files</strong><span>Choose the files again after checking the message above.</span></div>'; }
-  });
-  search.addEventListener('input', e => { state.query=e.target.value.trim().toLowerCase(); render(); });
-  source.addEventListener('change', e => { state.source=e.target.value; render(); });
-  relationship.addEventListener('change', e => { state.relationship=e.target.value; render(); });
-
-  function showLoading(file,percent,index,total) {
-    const mb=(file.size/1024/1024).toFixed(1);
-    app.innerHTML=`<div class="empty"><div class="loading"><strong>Loading ${esc(file.name)}</strong><span>File ${index} of ${total} · ${mb} MB · ${percent}% read</span><progress max="100" value="${percent}"></progress><span>Large CSVs are read in chunks to reduce browser memory usage.</span></div></div>`;
-  }
-  async function parseCSVFile(file,onProgress) {
-    const headers=[],rows=[]; let row=[],cell='',quoted=false,pendingQuote=false,headerReady=false,bytesRead=0,lastProgress=-1;
-    const decoder=new TextDecoder('utf-8'),reader=file.stream().getReader();
-    const finishRow=()=>{
-      row.push(cell.replace(/\r$/,'')); cell=''; if(!row.some(v=>v!=='')){row=[];return;}
-      if(!headerReady){row[0]=row[0].replace(/^\uFEFF/,'');headers.push(...row.map(h=>h.trim()));headerReady=true;}
-      else{const record={};for(let i=0;i<headers.length;i++)record[headers[i]]=row[i]??'';rows.push(record);} row=[];
-    };
-    const consume=(text,final=false)=>{
-      for(let i=0;i<text.length;i++){const c=text[i];
-        if(pendingQuote){if(c==='"'){cell+='"';pendingQuote=false;continue;}quoted=false;pendingQuote=false;}
-        if(quoted){if(c==='"')pendingQuote=true;else cell+=c;}
-        else if(c==='"')quoted=true;else if(c===','){row.push(cell);cell='';}else if(c==='\n')finishRow();else cell+=c;
-      }
-      if(final){if(pendingQuote){quoted=false;pendingQuote=false;}if(quoted)throw new Error('The CSV ends inside a quoted value. It may be incomplete.');if(cell||row.length)finishRow();}
-    };
-    while(true){const {value,done}=await reader.read();if(done)break;bytesRead+=value.byteLength;consume(decoder.decode(value,{stream:true}));const p=Math.min(99,Math.floor(bytesRead/file.size*100));if(p!==lastProgress){lastProgress=p;onProgress?.(p);await new Promise(requestAnimationFrame);}}
-    consume(decoder.decode(),true);onProgress?.(100);
-    if(!headerReady)throw new Error(`${file.name} has no header row.`);if(!rows.length)throw new Error(`${file.name} has a header but no records.`);
-    return {headers,rows};
-  }
-  async function loadFiles(files) {
-    let interactionRows=[], coverageRows=[], summaryRows=[];
-    for(let index=0;index<files.length;index++) { const file=files[index],parsed=await parseCSVFile(file,p=>showLoading(file,p,index+1,files.length)),h=parsed.headers;
-      if(['interaction_id','source','data'].every(x=>h.includes(x))) interactionRows.push(...parsed.rows);
-      else if(h.includes('interaction_id')&&h.includes('complete_all_four_containers')) coverageRows.push(...parsed.rows);
-      else if(['section','metric','value'].every(x=>h.includes(x))) summaryRows.push(...parsed.rows);
-      else throw new Error(`${file.name} is not one of the supported report CSV files.`);
-    }
-    state.coverage=new Map(coverageRows.map(r=>[r.interaction_id,r])); state.summary=new Map(summaryRows.map(r=>[`${r.section}.${r.metric}`,r.value])); load(interactionRows);
-  }
-  function load(rows) {
-    const map=new Map(); for(const row of rows) { const id=row.interaction_id||'(missing interaction ID)'; if(!map.has(id)) map.set(id,[]); map.get(id).push(row); }
-    for(const id of state.coverage.keys()) if(!map.has(id)) map.set(id,[]);
-    state.groups=[...map].map(([id,records])=>({id,records,coverage:state.coverage.get(id)}));
-    state.selected=state.groups[0]?.id; search.disabled=source.disabled=false; relationship.disabled=!state.coverage.size;
-    source.innerHTML='<option value="">All sources</option>'+Object.keys(sourceLabels).map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s])}</option>`).join(''); renderDashboard(); render();
-  }
-  function render() {
-    const visible=state.groups.filter(groupMatches).filter(g=>!state.source||g.records.some(r=>r.source===state.source)||Number(g.coverage?.[`${state.source}_records`])>0).filter(g=>matchesRelationship(g.coverage));
-    if(!visible.length) { app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try a broader search or source filter.</span></div>'; return; }
-    if(!visible.some(g=>g.id===state.selected)) state.selected=visible[0].id;
-    const active=visible.find(g=>g.id===state.selected);
-    app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===active.id?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.coverage?`${g.coverage.referenced_container_count}/3 relationships · `:''}${g.records.length} exported records</small></button>`).join('')}</aside><section class="content">${renderGroup(active)}</section>`;
-    app.querySelectorAll('.interaction').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;render();});
-  }
-  function groupMatches(group) {
-    if(!state.query)return true;if(group.id.toLowerCase().includes(state.query))return true;
-    return group.records.some(r=>(r.data||'').toLowerCase().includes(state.query)||(r.record_id||'').toLowerCase().includes(state.query)||(r.cid||'').toLowerCase().includes(state.query)||(r.run_id||'').toLowerCase().includes(state.query));
-  }
-  function matchesRelationship(row) {
-    if(!state.relationship) return true; if(!row) return false;
-    const context=Number(row.has_context_history)>0, tools=Number(row.has_tool_history)>0, feedback=Number(row.has_feedback)>0;
-    if(state.relationship==='complete') return context&&tools&&feedback;
-    if(state.relationship==='incomplete') return !(context&&tools&&feedback);
-    if(state.relationship.startsWith('has:')) return {context,tools,feedback}[state.relationship.slice(4)];
-    if(state.relationship.startsWith('missing:')) return !{context,tools,feedback}[state.relationship.slice(8)];
-    const exact=[context?'context':'',tools?'tools':'',feedback?'feedback':''].filter(Boolean).join('+')||'none';
-    return exact===state.relationship;
-  }
-  function renderGroup(group) {
-    const records=group.records.filter(r=>!state.source||r.source===state.source); const counts={}; group.records.forEach(r=>counts[r.source]=(counts[r.source]||0)+1);
-    const sections=[...new Set(records.map(r=>r.source))].map(type=>`<h3>${esc(sourceLabels[type]||type)} <span class="pill">${records.filter(r=>r.source===type).length}</span></h3>${records.filter(r=>r.source===type).map(renderRecord).join('')}`).join('');
-    const coverage=group.coverage?renderCIDCoverage(group.coverage):'<p class="hint">Load interaction_coverage.csv to see relationship metrics for this CID.</p>';
-    const recordMessage=!sections?'<div class="empty" style="min-height:180px"><strong>No interaction records loaded for this CID</strong><span>Load interactions.csv to inspect the original JSON.</span></div>':'';
-    return `<div class="title-row"><div><h2>${highlight(group.id)}</h2><div class="meta">${group.records.length} exported source records</div></div><div class="stats">${Object.entries(counts).map(([k,v])=>`<span class="pill">${esc(sourceLabels[k]||k)}: ${v}</span>`).join('')}</div></div>${coverage}${sections}${recordMessage}`;
-  }
-  function renderCIDCoverage(row) {
-    const items=[['chat_history','Chat history'],['context_history','Context history'],['tool_history','Tool history'],['feedback','Feedback']];
-    return `<h3>Relationship coverage</h3><div class="coverage-panel"><div class="coverage-grid">${items.map(([key,name])=>{const count=Number(row[`${key}_records`]||0);return `<div class="coverage-item"><strong>${esc(name)}</strong><div>${count} record${count===1?'':'s'}</div><span class="pill ${count?'good':'missing'}">${count?'Matched':'Missing'}</span></div>`;}).join('')}</div><p class="meta">${row.complete_all_four_containers==='1'?'Complete interaction across all four containers':`${row.referenced_container_count || 0} of 3 referenced containers matched`}</p></div>`;
-  }
-  function renderDashboard() {
-    if(!state.summary.size) { dashboard.style.display='none'; dashboard.innerHTML=''; return; }
-    const get=(section,metric)=>state.summary.get(`${section}.${metric}`)??'0';
-    const cards=[['Chat CIDs analyzed',get('overall','distinct_chat_cids_analyzed')],['Complete interactions',get('overall','complete_all_four_containers')],['Incomplete interactions',get('overall','incomplete_interactions')],['Complete coverage',`${get('overall','complete_coverage_percent')}%`]];
-    const sources=[['chat_history','Chat history'],['context_history','Context history'],['tool_history','Tool history'],['feedback','Feedback']];
-    dashboard.innerHTML=`<div class="cards">${cards.map(([label,value])=>`<div class="card"><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`).join('')}</div><div class="coverage-panel"><h2>Container coverage</h2><div class="coverage-grid">${sources.map(([key,label])=>{const pct=Number(get(key,'coverage_percent')),matched=get(key,'cids_with_match'),total=get(key,'total_records');return `<div class="coverage-item"><strong>${esc(label)}</strong><div>${esc(matched)} CIDs · ${esc(total)} records</div><div class="bar"><i style="width:${Math.min(100,Math.max(0,pct))}%"></i></div><span>${pct}% coverage</span></div>`;}).join('')}</div></div>`;
-    dashboard.style.display='block';
-  }
-  function renderRecord(row) {
-    const parsed=parseRowJSON(row),id=row.record_id||parsed?.id||'Record'; const meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);
-    let body=''; if(parsed) { const fields=meaningfulFields(parsed); body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">No common summary fields found. Expand the complete JSON below.</span>'; }
-    else body=`<span class="hint">${esc(row.jsonError)}. Raw CSV value is shown below.</span>`;
-    return `<article class="record"><div class="record-head"><strong>${highlight(String(id))}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(parsed?JSON.stringify(parsed,null,2):row.data)}</pre></details></article>`;
-  }
-  function parseRowJSON(row) { if(Object.prototype.hasOwnProperty.call(row,'parsed'))return row.parsed;try{row.parsed=JSON.parse(row.data);row.jsonError='';}catch{row.parsed=null;row.jsonError='Invalid JSON in this CSV record';}return row.parsed; }
-  function meaningfulFields(value) {
-    const found=new Map(); walk(value,'',found); const ranked=[...found].sort((a,b)=>{ const ai=preferred.indexOf(a[0].split('.').pop()),bi=preferred.indexOf(b[0].split('.').pop()); return (ai<0?999:ai)-(bi<0?999:bi); }); return ranked.slice(0,14);
-  }
-  function walk(value,path,out) {
-    if(out.size>60) return; if(Array.isArray(value)) { value.slice(0,20).forEach((v,i)=>walk(v,`${path}[${i}]`,out)); return; }
-    if(value&&typeof value==='object') { for(const [k,v] of Object.entries(value)) { const p=path?`${path}.${k}`:k; if(preferred.includes(k)&&isUseful(v)&&!out.has(p)) out.set(p,v); walk(v,p,out); } }
-  }
-  function isUseful(v) { return v!==null&&v!==''&&(!(Array.isArray(v))||v.length)&&(!(typeof v==='object'&&!Array.isArray(v))||Object.keys(v).length); }
-  function display(v) { if(typeof v==='string') return v; return JSON.stringify(v,null,2); }
-  function label(path) { return path.replace(/\[(\d+)\]/g,' #$1').split('.').map(x=>x.replace(/_/g,' ')).join(' › '); }
-  function highlight(value) { const safe=esc(String(value??'')); if(!state.query) return safe; const q=esc(state.query).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); return safe.replace(new RegExp(`(${q})`,'ig'),'<mark>$1</mark>'); }
-  function esc(value) { return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-  function showError(message) { error.textContent=message; error.style.display='block'; }
+(()=>{
+const sourceLabels={chat_history:'Chat history',context_history:'Context history (Agent)',tool_history:'Tool history',feedback:'Feedback'};
+const preferred=['agent','function_name','function_arguments','function_result','arguments','result','error','content','message','response','rca_feedback','resolution','reasoning','gap_type','confidence_score','criticality','status'];
+const state={groups:[],selected:null,query:'',source:'',relationship:'',summary:{},loading:false};
+const app=document.querySelector('#app'),dashboard=document.querySelector('#dashboard'),error=document.querySelector('#error'),notice=document.querySelector('#notice'),search=document.querySelector('#search'),source=document.querySelector('#source'),relationship=document.querySelector('#relationship');
+search.oninput=e=>{state.query=e.target.value.trim().toLowerCase();renderList();};source.onchange=e=>{state.source=e.target.value;renderList();};relationship.onchange=e=>{state.relationship=e.target.value;renderList();};
+init();
+async function init(){
+ try{
+   const status=await fetchJSON('/api/status');
+   if(!status.ok)throw new Error('Viewer API not available.');
+   notice.textContent='Large-file mode active. Records are loaded from SQLite only when you select a CID.';
+   const payload=await fetchJSON('/api/coverage');
+   state.summary=payload.summary||{};
+   state.groups=(payload.coverage||[]).map(r=>({id:r.interaction_id,coverage:r,records:null}));
+   search.disabled=source.disabled=relationship.disabled=false;
+   state.selected=state.groups[0]?.id||null;
+   renderDashboard();renderList();
+ }catch(ex){
+   showError(ex.message||String(ex));
+   notice.innerHTML='For multi-GB CSVs run <strong>python csv_coverage_report.py output\\interactions.csv</strong>, then <strong>python interaction_viewer_server.py --db output\\interactions_viewer.sqlite3</strong>, and open http://127.0.0.1:8765/';
+   app.innerHTML='<div class="empty"><strong>Local viewer server is not running</strong><span>Do not select the 4 GB CSV directly in the browser.</span></div>';
+ }
+}
+async function fetchJSON(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error(`Request failed: ${r.status}`);return r.json();}
+function filtered(){return state.groups.filter(g=>!state.query||g.id.toLowerCase().includes(state.query)).filter(g=>matchesRelationship(g.coverage)).filter(g=>!state.source||Number(g.coverage?.[`${state.source}_records`]||0)>0);}
+function matchesRelationship(r){if(!state.relationship)return true;const c=Number(r.has_context_history)>0,t=Number(r.has_tool_history)>0,f=Number(r.has_feedback)>0;if(state.relationship==='complete')return c&&t&&f;if(state.relationship==='incomplete')return !(c&&t&&f);if(state.relationship==='missing:context')return !c;if(state.relationship==='missing:tools')return !t;if(state.relationship==='missing:feedback')return !f;return true;}
+function renderList(){const visible=filtered();if(!visible.length){app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try another filter.</span></div>';return;}if(!visible.some(g=>g.id===state.selected))state.selected=visible[0].id;const active=visible.find(g=>g.id===state.selected);app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===state.selected?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.coverage.referenced_container_count}/3 relationships · ${totalRecords(g.coverage)} records</small></button>`).join('')}</aside><section class="content" id="detail">${renderCoverage(active)}</section>`;app.querySelectorAll('.interaction').forEach(b=>b.onclick=()=>selectInteraction(b.dataset.id));if(active.records)renderDetail(active);else selectInteraction(active.id);}
+async function selectInteraction(id){state.selected=id;const group=state.groups.find(g=>g.id===id);if(!group)return;document.querySelectorAll('.interaction').forEach(b=>b.classList.toggle('active',b.dataset.id===id));const detail=document.querySelector('#detail');if(detail)detail.innerHTML=renderCoverage(group)+'<p class="hint">Loading records…</p>';if(!group.records){try{const p=await fetchJSON('/api/interaction?id='+encodeURIComponent(id));group.records=p.records||[];}catch(ex){showError(ex.message);group.records=[];}}renderDetail(group);}
+function renderDetail(group){const detail=document.querySelector('#detail');if(!detail)return;const records=(group.records||[]).filter(r=>!state.source||r.source===state.source);const sections=[...new Set(records.map(r=>r.source))].map(type=>`<h3>${esc(sourceLabels[type]||type)} <span class="pill">${records.filter(r=>r.source===type).length}</span></h3>${records.filter(r=>r.source===type).map(renderRecord).join('')}`).join('');detail.innerHTML=renderCoverage(group)+(sections||'<p class="hint">No records for the selected source.</p>');}
+function renderCoverage(group){const r=group.coverage,items=[['chat_history','Chat history'],['context_history','Context history'],['tool_history','Tool history'],['feedback','Feedback']];return `<div class="title-row"><div><h2>${highlight(group.id)}</h2><div class="meta">${totalRecords(r)} indexed source records</div></div></div><h3>Relationship coverage</h3><div class="coverage-panel"><div class="coverage-grid">${items.map(([k,n])=>{const c=Number(r[`${k}_records`]||0);return `<div class="coverage-item"><strong>${esc(n)}</strong><div>${c} record${c===1?'':'s'}</div><span class="pill ${c?'good':'missing'}">${c?'Matched':'Missing'}</span></div>`}).join('')}</div></div>`;}
+function totalRecords(r){return ['chat_history','context_history','tool_history','feedback'].reduce((a,k)=>a+Number(r?.[`${k}_records`]||0),0);}
+function renderRecord(row){const parsed=parseJSON(row.data),id=row.record_id||parsed?.id||'Record',meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);let body='';if(parsed){const fields=meaningfulFields(parsed);body=fields.length?fields.map(([k,v])=>`<div class="field"><div class="field-name">${esc(label(k))}</div><div class="value">${highlight(display(v))}</div></div>`).join(''):'<span class="hint">Expand Complete JSON for full details.</span>';}else body='<span class="hint">Invalid JSON in this record.</span>';return `<article class="record"><div class="record-head"><strong>${highlight(id)}</strong><span class="spacer"></span>${meta.map(x=>`<span class="pill">${highlight(x)}</span>`).join('')}</div><div class="summary">${body}</div><details><summary>Complete JSON</summary><pre>${highlight(parsed?JSON.stringify(parsed,null,2):row.data)}</pre></details></article>`;}
+function parseJSON(v){try{return JSON.parse(v)}catch{return null}}
+function meaningfulFields(value){const found=new Map();walk(value,'',found);return [...found].sort((a,b)=>{const ai=preferred.indexOf(a[0].split('.').pop()),bi=preferred.indexOf(b[0].split('.').pop());return(ai<0?999:ai)-(bi<0?999:bi)}).slice(0,18)}
+function walk(value,path,out){if(out.size>80)return;if(Array.isArray(value)){value.slice(0,20).forEach((v,i)=>walk(v,`${path}[${i}]`,out));return}if(value&&typeof value==='object'){for(const[k,v]of Object.entries(value)){const p=path?`${path}.${k}`:k;if(preferred.includes(k)&&useful(v)&&!out.has(p))out.set(p,v);walk(v,p,out)}}}
+function useful(v){return v!==null&&v!==''&&(!(Array.isArray(v))||v.length)&&(!(typeof v==='object'&&!Array.isArray(v))||Object.keys(v).length)}function display(v){return typeof v==='string'?v:JSON.stringify(v,null,2)}function label(p){return p.replace(/\[(\d+)\]/g,' #$1').split('.').map(x=>x.replace(/_/g,' ')).join(' › ')}
+function renderDashboard(){const s=state.summary||{},cards=[['Chat CIDs analyzed',s.distinct_chat_cids_analyzed||0],['Complete interactions',s.complete_all_four_containers||0],['Incomplete interactions',s.incomplete_interactions||0],['Complete coverage',`${s.complete_coverage_percent||0}%`]];dashboard.innerHTML=`<div class="cards">${cards.map(([l,v])=>`<div class="card"><strong>${esc(v)}</strong><span>${esc(l)}</span></div>`).join('')}</div>`;}
+function highlight(v){const safe=esc(String(v??''));if(!state.query)return safe;const q=state.query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');return safe.replace(new RegExp(`(${q})`,'ig'),'<mark>$1</mark>')}function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function showError(m){error.textContent=m;error.style.display='block'}
 })();
 </script>
 </body>
