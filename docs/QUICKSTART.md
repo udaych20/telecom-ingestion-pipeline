@@ -60,4 +60,12 @@ The run writes:
 - `coverage_summary.csv`: spreadsheet-friendly totals, complete and incomplete counts, per-container coverage, and relationship distribution.
 - `coverage_summary.json`: the same aggregate metrics with the evaluated join path included for auditability.
 
-These two report files are replaced on each `--all-report` run so their metrics describe that run only. The normal interaction exports remain append-only.
+The coverage report files are replaced on each `--all-report` run so their metrics describe that run only. The normal interaction exports remain append-only.
+
+Open `interactions-viewer.html` and choose these three files together:
+
+- `output/interactions.csv`
+- `output/interaction_coverage.csv`
+- `output/coverage_summary.csv`
+
+The dashboard shows aggregate coverage, per-container CID and record counts, per-CID relationship status, and the original readable interaction records. The viewer also works with any one of the files when only partial analysis is needed.

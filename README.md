@@ -44,6 +44,8 @@ To export only fully joined interactions, run `python app.py --all-complete`. It
 
 To export every chat interaction and measure cross-container coverage, run `python app.py --all-report`. In addition to the normal interaction exports, this writes per-CID counts to `output/interaction_coverage.csv` and aggregate coverage metrics to both `output/coverage_summary.csv` and `output/coverage_summary.json`.
 
+Open `interactions-viewer.html` in a browser and select `interactions.csv`, `interaction_coverage.csv`, and `coverage_summary.csv` together to view the complete dashboard and drill into each CID. The files are processed locally in the browser.
+
 The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
 ## Current limitation

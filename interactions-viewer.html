@@ -15,6 +15,13 @@
     .pick { cursor:pointer; text-align:center; color:var(--brand); font-weight:650; border-style:dashed; border-color:var(--accent); }
     .pick input { display:none; } input:focus,select:focus,button:focus,.pick:focus-within { outline:3px solid #a5e5f2; outline-offset:1px; }
     button { cursor:pointer; } button:hover { border-color:var(--accent); }
+    .dashboard { max-width:1440px; margin:0 auto 18px; padding:0 24px; display:none; }
+    .cards { display:grid; grid-template-columns:repeat(4,minmax(150px,1fr)); gap:12px; margin-bottom:12px; }
+    .card,.coverage-panel { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:15px; }
+    .card strong { display:block; font-size:25px; color:var(--brand); } .card span { color:var(--muted); }
+    .coverage-grid { display:grid; grid-template-columns:repeat(4,minmax(150px,1fr)); gap:10px; }
+    .coverage-item { padding:10px; background:#f7fafb; border-radius:8px; }
+    .bar { height:7px; background:#dce6e9; border-radius:9px; margin-top:7px; overflow:hidden; } .bar i { display:block; height:100%; background:var(--accent); }
     main { max-width:1440px; margin:auto; padding:0 24px 40px; display:grid; grid-template-columns:300px minmax(0,1fr); gap:18px; }
     aside,.content,.empty { background:var(--paper); border:1px solid var(--line); border-radius:12px; min-height:500px; }
     aside { overflow:auto; max-height:calc(100vh - 155px); position:sticky; top:12px; }
@@ -28,7 +35,7 @@
     .title-row { display:flex; gap:15px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; }
     h2 { margin:0; font-size:20px; overflow-wrap:anywhere; } h3 { margin:24px 0 10px; font-size:16px; text-transform:capitalize; }
     .meta,.hint { color:var(--muted); } .stats { display:flex; gap:7px; flex-wrap:wrap; }
-    .pill { border-radius:999px; background:#eef3f5; padding:4px 9px; white-space:nowrap; }
+    .pill { border-radius:999px; background:#eef3f5; padding:4px 9px; white-space:nowrap; } .pill.good { background:#e5f6ec; color:#176b3a; } .pill.missing { background:#fff0ed; color:#9b2c20; }
     .record { border:1px solid var(--line); border-radius:10px; margin:10px 0; overflow:hidden; }
     .record-head { padding:11px 13px; background:#fafcfd; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
     .record-head strong { overflow-wrap:anywhere; } .record-head .spacer { flex:1; }
@@ -40,28 +47,29 @@
     pre { margin:0; padding:14px; background:#102027; color:#d7edf2; overflow:auto; max-height:520px; font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace; }
     .error { color:var(--bad); padding:12px max(24px,calc((100vw - 1440px)/2)); background:#feeceb; display:none; }
     mark { background:#ffe08a; padding:0 1px; }
-    @media (max-width:800px) { .toolbar { grid-template-columns:1fr; } main { grid-template-columns:1fr; } aside { position:static; max-height:260px; min-height:0; } }
+    @media (max-width:800px) { .toolbar { grid-template-columns:1fr; } .cards,.coverage-grid { grid-template-columns:1fr 1fr; } main { grid-template-columns:1fr; } aside { position:static; max-height:260px; min-height:0; } }
   </style>
 </head>
 <body>
-  <header><h1>NORA Interaction Viewer</h1><p>Turn interactions.csv into a browsable conversation and execution record.</p></header>
+  <header><h1>NORA Coverage & Interaction Viewer</h1><p>Explore overall relationship metrics and drill into the original records for each CID.</p></header>
   <div id="error" class="error" role="alert"></div>
   <section class="toolbar">
-    <label class="pick">Choose interactions.csv<input id="file" type="file" accept=".csv,text/csv"></label>
+    <label class="pick">Choose the 3 report CSV files<input id="file" type="file" accept=".csv,text/csv" multiple></label>
     <input id="search" type="search" placeholder="Search IDs, messages, tools, feedback…" disabled>
     <select id="source" disabled aria-label="Filter by source"><option value="">All sources</option></select>
   </section>
-  <main id="app"><div class="empty"><strong>Choose the generated interactions.csv</strong><span>Everything stays in your browser; no data is uploaded.</span></div></main>
+  <section id="dashboard" class="dashboard"></section>
+  <main id="app"><div class="empty"><strong>Choose interactions.csv, interaction_coverage.csv, and coverage_summary.csv</strong><span>You can also load any one of them by itself. Everything stays in your browser.</span></div></main>
 <script>
 (() => {
   const sourceLabels = {chat_history:'Chat history',tool_history:'Tool history',context_history:'Context history',feedback:'Feedback'};
   const preferred = ['user_content','user_message','query','issue','assistant_content','assistant_response','response','content','message','function_name','tool_name','name','arguments','result','error','rating','feedback','comment','created_at','timestamp','status'];
-  const state = { groups:[], selected:null, query:'', source:'' };
-  const app = document.querySelector('#app'), error = document.querySelector('#error'), search = document.querySelector('#search'), source = document.querySelector('#source');
+  const state = { groups:[], coverage:new Map(), summary:new Map(), selected:null, query:'', source:'' };
+  const app = document.querySelector('#app'), dashboard = document.querySelector('#dashboard'), error = document.querySelector('#error'), search = document.querySelector('#search'), source = document.querySelector('#source');
 
   document.querySelector('#file').addEventListener('change', async e => {
-    const file = e.target.files[0]; if (!file) return;
-    try { load(parseCSV(await file.text())); error.style.display='none'; }
+    const files = [...e.target.files]; if (!files.length) return;
+    try { await loadFiles(files); error.style.display='none'; }
     catch (ex) { showError(ex.message); }
   });
   search.addEventListener('input', e => { state.query=e.target.value.trim().toLowerCase(); render(); });
@@ -79,29 +87,51 @@
     if (cell || row.length) { row.push(cell.replace(/\r$/,'')); rows.push(row); }
     if (!rows.length) throw new Error('The selected CSV is empty.');
     const headers=rows.shift().map(h=>h.trim());
-    for (const required of ['interaction_id','source','data']) if(!headers.includes(required)) throw new Error(`Missing required column: ${required}`);
-    return rows.map((values,n) => Object.fromEntries(headers.map((h,i)=>[h,values[i]??'']))).map((r,n)=>{
-      try { r.parsed=JSON.parse(r.data); } catch { r.parsed=null; r.jsonError=`Invalid JSON on CSV row ${n+2}`; } return r;
-    });
+    return {headers,rows:rows.map(values => Object.fromEntries(headers.map((h,i)=>[h,values[i]??''])))};
+  }
+  async function loadFiles(files) {
+    let interactionRows=[], coverageRows=[], summaryRows=[];
+    for(const file of files) { const parsed=parseCSV(await file.text()), h=parsed.headers;
+      if(['interaction_id','source','data'].every(x=>h.includes(x))) interactionRows.push(...parsed.rows.map((r,n)=>{try{r.parsed=JSON.parse(r.data);}catch{r.parsed=null;r.jsonError=`Invalid JSON in ${file.name}, row ${n+2}`;}return r;}));
+      else if(h.includes('interaction_id')&&h.includes('complete_all_four_containers')) coverageRows.push(...parsed.rows);
+      else if(['section','metric','value'].every(x=>h.includes(x))) summaryRows.push(...parsed.rows);
+      else throw new Error(`${file.name} is not one of the supported report CSV files.`);
+    }
+    state.coverage=new Map(coverageRows.map(r=>[r.interaction_id,r])); state.summary=new Map(summaryRows.map(r=>[`${r.section}.${r.metric}`,r.value])); load(interactionRows);
   }
   function load(rows) {
     const map=new Map(); for(const row of rows) { const id=row.interaction_id||'(missing interaction ID)'; if(!map.has(id)) map.set(id,[]); map.get(id).push(row); }
-    state.groups=[...map].map(([id,records])=>({id,records,haystack:(id+' '+records.map(r=>r.data).join(' ')).toLowerCase()}));
+    for(const id of state.coverage.keys()) if(!map.has(id)) map.set(id,[]);
+    state.groups=[...map].map(([id,records])=>({id,records,coverage:state.coverage.get(id),haystack:(id+' '+records.map(r=>r.data).join(' ')).toLowerCase()}));
     state.selected=state.groups[0]?.id; search.disabled=source.disabled=false;
-    const sources=[...new Set(rows.map(r=>r.source).filter(Boolean))]; source.innerHTML='<option value="">All sources</option>'+sources.map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s]||s)}</option>`).join(''); render();
+    source.innerHTML='<option value="">All sources</option>'+Object.keys(sourceLabels).map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s])}</option>`).join(''); renderDashboard(); render();
   }
   function render() {
-    const visible=state.groups.filter(g=>!state.query||g.haystack.includes(state.query)).filter(g=>!state.source||g.records.some(r=>r.source===state.source));
+    const visible=state.groups.filter(g=>!state.query||g.haystack.includes(state.query)).filter(g=>!state.source||g.records.some(r=>r.source===state.source)||Number(g.coverage?.[`${state.source}_records`])>0);
     if(!visible.length) { app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try a broader search or source filter.</span></div>'; return; }
     if(!visible.some(g=>g.id===state.selected)) state.selected=visible[0].id;
     const active=visible.find(g=>g.id===state.selected);
-    app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===active.id?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.records.length} source record${g.records.length===1?'':'s'}</small></button>`).join('')}</aside><section class="content">${renderGroup(active)}</section>`;
+    app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===active.id?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.coverage?`${g.coverage.referenced_container_count}/3 relationships · `:''}${g.records.length} exported records</small></button>`).join('')}</aside><section class="content">${renderGroup(active)}</section>`;
     app.querySelectorAll('.interaction').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;render();});
   }
   function renderGroup(group) {
     const records=group.records.filter(r=>!state.source||r.source===state.source); const counts={}; group.records.forEach(r=>counts[r.source]=(counts[r.source]||0)+1);
     const sections=[...new Set(records.map(r=>r.source))].map(type=>`<h3>${esc(sourceLabels[type]||type)} <span class="pill">${records.filter(r=>r.source===type).length}</span></h3>${records.filter(r=>r.source===type).map(renderRecord).join('')}`).join('');
-    return `<div class="title-row"><div><h2>${highlight(group.id)}</h2><div class="meta">${group.records.length} total source records</div></div><div class="stats">${Object.entries(counts).map(([k,v])=>`<span class="pill">${esc(sourceLabels[k]||k)}: ${v}</span>`).join('')}</div></div>${sections}`;
+    const coverage=group.coverage?renderCIDCoverage(group.coverage):'<p class="hint">Load interaction_coverage.csv to see relationship metrics for this CID.</p>';
+    const recordMessage=!sections?'<div class="empty" style="min-height:180px"><strong>No interaction records loaded for this CID</strong><span>Load interactions.csv to inspect the original JSON.</span></div>':'';
+    return `<div class="title-row"><div><h2>${highlight(group.id)}</h2><div class="meta">${group.records.length} exported source records</div></div><div class="stats">${Object.entries(counts).map(([k,v])=>`<span class="pill">${esc(sourceLabels[k]||k)}: ${v}</span>`).join('')}</div></div>${coverage}${sections}${recordMessage}`;
+  }
+  function renderCIDCoverage(row) {
+    const items=[['chat_history','Chat history'],['context_history','Context history'],['tool_history','Tool history'],['feedback','Feedback']];
+    return `<h3>Relationship coverage</h3><div class="coverage-panel"><div class="coverage-grid">${items.map(([key,name])=>{const count=Number(row[`${key}_records`]||0);return `<div class="coverage-item"><strong>${esc(name)}</strong><div>${count} record${count===1?'':'s'}</div><span class="pill ${count?'good':'missing'}">${count?'Matched':'Missing'}</span></div>`;}).join('')}</div><p class="meta">${row.complete_all_four_containers==='1'?'Complete interaction across all four containers':`${row.referenced_container_count || 0} of 3 referenced containers matched`}</p></div>`;
+  }
+  function renderDashboard() {
+    if(!state.summary.size) { dashboard.style.display='none'; dashboard.innerHTML=''; return; }
+    const get=(section,metric)=>state.summary.get(`${section}.${metric}`)??'0';
+    const cards=[['Chat CIDs analyzed',get('overall','distinct_chat_cids_analyzed')],['Complete interactions',get('overall','complete_all_four_containers')],['Incomplete interactions',get('overall','incomplete_interactions')],['Complete coverage',`${get('overall','complete_coverage_percent')}%`]];
+    const sources=[['chat_history','Chat history'],['context_history','Context history'],['tool_history','Tool history'],['feedback','Feedback']];
+    dashboard.innerHTML=`<div class="cards">${cards.map(([label,value])=>`<div class="card"><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`).join('')}</div><div class="coverage-panel"><h2>Container coverage</h2><div class="coverage-grid">${sources.map(([key,label])=>{const pct=Number(get(key,'coverage_percent')),matched=get(key,'cids_with_match'),total=get(key,'total_records');return `<div class="coverage-item"><strong>${esc(label)}</strong><div>${esc(matched)} CIDs · ${esc(total)} records</div><div class="bar"><i style="width:${Math.min(100,Math.max(0,pct))}%"></i></div><span>${pct}% coverage</span></div>`;}).join('')}</div></div>`;
+    dashboard.style.display='block';
   }
   function renderRecord(row) {
     const id=row.record_id||row.parsed?.id||'Record'; const meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);
