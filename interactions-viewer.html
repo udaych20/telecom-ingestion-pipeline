@@ -185,13 +185,12 @@
       const key=`${row.interaction_id}|${row.record_id||hashText(row.data||'')}`;
       if(seen.has(key))continue;seen.add(key);documents++;
       const record=parseRowJSON(row);if(!record)continue;
-      const positiveValue=record.positive_feedbacks??record.positive_feedback??record.feedbacks;
       const negativeValue=record.negative_feedbacks??record.negative_feedback;
-      const positiveItems=countFeedbackEntries(positiveValue),negativeItems=countFeedbackEntries(negativeValue);
-      positive+=positiveItems;negative+=negativeItems;
-      if(positiveItems)positiveCids.add(row.interaction_id);if(negativeItems)negativeCids.add(row.interaction_id);
+      const isNegative=countFeedbackEntries(negativeValue)>0;
+      if(isNegative){negative++;negativeCids.add(row.interaction_id);}
+      else{positive++;positiveCids.add(row.interaction_id);}
     }
-    feedbackOverview.innerHTML=`<div class="feedback-cards"><div class="feedback-card positive"><strong>${positive.toLocaleString()}</strong><span>Positive feedback entries · ${positiveCids.size.toLocaleString()} CIDs</span></div><div class="feedback-card negative"><strong>${negative.toLocaleString()}</strong><span>Negative feedback entries · ${negativeCids.size.toLocaleString()} CIDs</span></div><div class="feedback-card"><strong>${documents.toLocaleString()}</strong><span>Unique feedback documents</span></div><div class="feedback-card"><strong>${seen.size?((positive/(positive+negative||1))*100).toFixed(1):'0.0'}%</strong><span>Positive share of classified entries</span></div></div>`;
+    feedbackOverview.innerHTML=`<div class="feedback-cards"><div class="feedback-card positive"><strong>${positive.toLocaleString()}</strong><span>Positive feedback documents · ${positiveCids.size.toLocaleString()} CIDs</span></div><div class="feedback-card negative"><strong>${negative.toLocaleString()}</strong><span>Negative feedback documents · ${negativeCids.size.toLocaleString()} CIDs</span></div><div class="feedback-card"><strong>${documents.toLocaleString()}</strong><span>Unique feedback documents</span></div><div class="feedback-card"><strong>${documents?((positive/documents)*100).toFixed(1):'0.0'}%</strong><span>Positive share of feedback documents</span></div></div>`;
     feedbackOverview.style.display=documents?'block':'none';
   }
 
