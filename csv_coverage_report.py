@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
 
 
@@ -23,6 +24,19 @@ COVERAGE_FIELDS = [
 ]
 
 
+def configure_csv_field_limit():
+    """Raise Python's CSV field limit to the largest value supported by this runtime."""
+    limit = sys.maxsize
+    while limit > 131072:
+        try:
+            csv.field_size_limit(limit)
+            return limit
+        except OverflowError:
+            limit //= 10
+    csv.field_size_limit(131072)
+    return 131072
+
+
 def record_key(row):
     if row.get("record_id"):
         return f"id:{row['record_id']}"
@@ -30,16 +44,35 @@ def record_key(row):
     return f"data:{digest}"
 
 
-def scan_csv_to_index(source_path, connection, progress_every=100_000):
+def create_index_schema(connection):
+    connection.execute("DROP TABLE IF EXISTS records")
+    connection.execute("DROP TABLE IF EXISTS coverage")
+    connection.execute("DROP TABLE IF EXISTS summary")
     connection.execute("""
         CREATE TABLE records (
             interaction_id TEXT NOT NULL,
             source TEXT NOT NULL,
             record_key TEXT NOT NULL,
+            record_id TEXT,
+            cid TEXT,
+            run_id TEXT,
+            data TEXT NOT NULL,
             PRIMARY KEY (interaction_id, source, record_key)
         ) WITHOUT ROWID
     """)
-    insert = "INSERT OR IGNORE INTO records VALUES (?, ?, ?)"
+    connection.execute("CREATE INDEX idx_records_interaction ON records(interaction_id)")
+    connection.execute("CREATE INDEX idx_records_source ON records(source)")
+
+
+def scan_csv_to_index(source_path, connection, progress_every=100_000):
+    field_limit = configure_csv_field_limit()
+    print(f"CSV field size limit: {field_limit:,} bytes")
+    create_index_schema(connection)
+    insert = """
+        INSERT OR IGNORE INTO records
+        (interaction_id, source, record_key, record_id, cid, run_id, data)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """
     total_rows = 0
     accepted_rows = 0
     source_size = os.path.getsize(source_path)
@@ -57,9 +90,17 @@ def scan_csv_to_index(source_path, connection, progress_every=100_000):
             interaction_id = row.get("interaction_id")
             source = row.get("source")
             if interaction_id and source in SOURCES:
-                batch.append((interaction_id, source, record_key(row)))
+                batch.append((
+                    interaction_id,
+                    source,
+                    record_key(row),
+                    row.get("record_id") or "",
+                    row.get("cid") or "",
+                    row.get("run_id") or "",
+                    row.get("data") or "",
+                ))
                 accepted_rows += 1
-            if len(batch) >= 10_000:
+            if len(batch) >= 2_000:
                 connection.executemany(insert, batch)
                 connection.commit()
                 batch.clear()
@@ -100,6 +141,28 @@ def read_coverage_rows(connection):
     return rows
 
 
+def persist_coverage(connection, rows):
+    connection.execute("""
+        CREATE TABLE coverage (
+            interaction_id TEXT PRIMARY KEY,
+            chat_history_records INTEGER NOT NULL,
+            context_history_records INTEGER NOT NULL,
+            tool_history_records INTEGER NOT NULL,
+            feedback_records INTEGER NOT NULL,
+            has_context_history INTEGER NOT NULL,
+            has_tool_history INTEGER NOT NULL,
+            has_feedback INTEGER NOT NULL,
+            referenced_container_count INTEGER NOT NULL,
+            complete_all_four_containers INTEGER NOT NULL
+        ) WITHOUT ROWID
+    """)
+    connection.executemany(
+        "INSERT INTO coverage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [tuple(row[field] for field in COVERAGE_FIELDS) for row in rows],
+    )
+    connection.commit()
+
+
 def build_summary(rows, source_path, total_rows, accepted_rows):
     analyzed = len(rows)
     source_metrics = {}
@@ -129,6 +192,12 @@ def build_summary(rows, source_path, total_rows, accepted_rows):
         "sources": source_metrics,
         "limitation": "Metrics include only interaction IDs present in the source CSV.",
     }
+
+
+def persist_summary(connection, summary):
+    connection.execute("CREATE TABLE summary (payload TEXT NOT NULL)")
+    connection.execute("INSERT INTO summary(payload) VALUES (?)", (json.dumps(summary, ensure_ascii=False),))
+    connection.commit()
 
 
 def write_reports(rows, summary, output_dir):
@@ -164,42 +233,50 @@ def write_reports(rows, summary, output_dir):
     return detail_path, csv_path, json_path
 
 
-def generate_coverage_report(source_path, output_dir, progress_every=100_000):
+def generate_coverage_report(source_path, output_dir, progress_every=100_000, keep_viewer_index=True):
     if not os.path.exists(source_path):
         raise FileNotFoundError(f"CSV not found: {source_path}")
     os.makedirs(output_dir, exist_ok=True)
-    index_path = os.path.join(output_dir, ".csv_coverage_index.sqlite3")
+    index_path = os.path.join(output_dir, "interactions_viewer.sqlite3")
     if os.path.exists(index_path):
         os.remove(index_path)
-    connection = None
+
+    connection = sqlite3.connect(index_path)
     try:
-        connection = sqlite3.connect(index_path)
-        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA journal_mode=TRUNCATE")
         connection.execute("PRAGMA synchronous=NORMAL")
+        connection.execute("PRAGMA temp_store=FILE")
         total_rows, accepted_rows = scan_csv_to_index(source_path, connection, progress_every)
         rows = read_coverage_rows(connection)
-        connection.close()
-        connection = None
+        persist_coverage(connection, rows)
         summary = build_summary(rows, source_path, total_rows, accepted_rows)
+        persist_summary(connection, summary)
         paths = write_reports(rows, summary, output_dir)
-        return summary, paths
     finally:
-        if connection is not None:
-            connection.close()
-        for suffix in ("", "-wal", "-shm"):
-            path = index_path + suffix
-            if os.path.exists(path):
-                os.remove(path)
+        connection.close()
+
+    if not keep_viewer_index:
+        os.remove(index_path)
+        index_path = None
+    return summary, (*paths, index_path)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Build container coverage reports from interactions.csv without Cosmos DB.")
+    parser = argparse.ArgumentParser(description="Build container coverage reports and a disk-backed viewer index from interactions.csv.")
     parser.add_argument("csv_path", nargs="?", default=os.path.join("output", "interactions.csv"))
     parser.add_argument("--output-dir", default="output")
+    parser.add_argument("--no-viewer-index", action="store_true", help="Delete the SQLite viewer index after writing CSV reports.")
     args = parser.parse_args()
 
-    summary, paths = generate_coverage_report(args.csv_path, args.output_dir)
+    summary, paths = generate_coverage_report(
+        args.csv_path,
+        args.output_dir,
+        keep_viewer_index=not args.no_viewer_index,
+    )
     print(f"Analyzed {summary['distinct_chat_cids_analyzed']:,} interaction IDs")
     print(f"Complete: {summary['complete_all_four_containers']:,}; incomplete: {summary['incomplete_interactions']:,}")
     for path in paths:
-        print(f"Wrote {path}")
+        if path:
+            print(f"Wrote {path}")
+    if not args.no_viewer_index:
+        print("Run: python interaction_viewer_server.py --db output/interactions_viewer.sqlite3")
