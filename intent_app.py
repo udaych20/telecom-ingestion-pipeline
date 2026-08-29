@@ -51,15 +51,17 @@ MODIFY_PATTERNS = [
     for pattern in (
         r"\b(?:change|modify|update|configure|enable|disable|reset)\b.{0,60}\b(?:configuration|setting|feature|plan|apn|service)\b",
         r"\b(?:enable|disable|reset)\b.{0,40}\b(?:roaming|voicemail|data|feature)\b",
+        r"\b(?:set up|setup|activate|install|provision)\b.{0,60}\b(?:device|service|internet|hsi|line|feature)\b",
     )
 ]
 
 RCA_PATTERNS = [
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
-        r"\b(?:investigate|diagnose|troubleshoot|root cause|run rca|perform rca)\b",
+        r"\b(?:investigate|diagnose|troubleshoot(?:ing)?|root cause|run rca|perform rca)\b",
         r"\bwhy\b.{0,100}\b(?:not working|failed|failing|offline|down|issue|problem)\b",
         r"\b(?:customer|subscriber|device|service|network)\b.{0,80}\b(?:not working|failed|failing|offline|down|issue|problem)\b",
+        r"\b(?:router|internet|wifi|wi-fi|signal|call|roaming|device|service)\b.{0,80}\b(?:not working|failed|failing|offline|down|dropping|disconnect|issue|problem|no (?:internet )?connection)\b",
     )
 ]
 
@@ -69,6 +71,7 @@ QUERY_PATTERNS = [
         r"^\s*(?:what|when|where|which|who|how many)\b",
         r"^\s*(?:is|are|does|do|did|has|have|can)\b",
         r"\b(?:show|tell|provide|check|find|get|display)\b.{0,60}\b(?:status|value|details|information|location|site|plan|signal|usage|history)\b",
+        r"\b(?:verify|confirm|want(?:s|ed)? to know|would like to know)\b.{0,80}\b(?:status|online|hours|details|information|plan|usage|history|location)\b",
     )
 ]
 
@@ -90,6 +93,8 @@ CUSTOMER_FIELDS = (
     "msisdn",
     "impacted_number",
     "impactedNumber",
+    "impacted_device",
+    "impactedDevice",
     "account_number",
     "subscriber_id",
 )
@@ -107,6 +112,7 @@ MESSAGE_FIELDS = (
 )
 
 CONVERSATION_ID_FIELDS = (
+    "cid",
     "conversationId",
     "conversation_id",
     "sessionId",
@@ -116,6 +122,14 @@ CONVERSATION_ID_FIELDS = (
 )
 
 TIMESTAMP_FIELDS = ("timestamp", "createdAt", "created_at", "_ts")
+ISSUE_FIELDS = (
+    "issue_summary",
+    "issueSummary",
+    "issue",
+    "issue_description",
+    "description",
+    "summary",
+)
 
 
 @dataclass(frozen=True)
@@ -149,39 +163,86 @@ def first_value(record: dict[str, Any], fields: Iterable[str]) -> Any:
     return None
 
 
+def nested_first_value(value: Any, fields: Iterable[str]) -> Any:
+    """Find the first non-empty named value inside dictionaries and arrays."""
+    field_names = set(fields)
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in field_names and item not in (None, "", "N/A"):
+                return item
+        for item in value.values():
+            found = nested_first_value(item, field_names)
+            if found not in (None, "", "N/A"):
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = nested_first_value(item, field_names)
+            if found not in (None, "", "N/A"):
+                return found
+    return None
+
+
+def message_lists(record: dict[str, Any]) -> Iterable[list[Any]]:
+    conversation = nested_dict(record)
+    for source in (record, conversation):
+        for field in ("messages", "history"):
+            messages = source.get(field)
+            if isinstance(messages, list):
+                yield messages
+
+
+def message_role(message: dict[str, Any]) -> str:
+    data = message.get("data") if isinstance(message.get("data"), dict) else {}
+    return str(message.get("role") or message.get("type") or data.get("role") or data.get("type") or "").lower()
+
+
+def message_text(message: dict[str, Any]) -> str:
+    data = message.get("data") if isinstance(message.get("data"), dict) else {}
+    return compact_text(
+        message.get("content")
+        or message.get("text")
+        or message.get("message")
+        or data.get("content")
+        or data.get("text")
+        or data.get("message")
+    )
+
+
 def extract_user_text(record: dict[str, Any]) -> str:
     """Return only a user utterance, never issue/assistant summaries by default."""
-    conversation = nested_dict(record)
+    for messages in message_lists(record):
+        user_messages = [
+            message_text(message)
+            for message in messages
+            if isinstance(message, dict)
+            and message_role(message) in {"user", "customer", "human"}
+        ]
+        user_messages = [text for text in user_messages if text]
+        if user_messages:
+            return user_messages[-1]
 
-    # Some context-history schemas store a list of chat messages.
-    for source in (record, conversation):
-        messages = source.get("messages") or source.get("history")
-        if isinstance(messages, list):
-            user_messages = []
-            for message in messages:
-                if not isinstance(message, dict):
-                    continue
-                role = str(message.get("role", "")).lower()
-                if role in {"user", "customer", "human"}:
-                    text = compact_text(
-                        message.get("content")
-                        or message.get("text")
-                        or message.get("message")
-                    )
-                    if text:
-                        user_messages.append(text)
-            if user_messages:
-                return user_messages[-1]
-
+    user_input_text = compact_text(
+        nested_first_value(record.get("user_inputs"), MESSAGE_FIELDS + ISSUE_FIELDS)
+    )
+    if user_input_text:
+        return user_input_text
     return compact_text(first_value(record, MESSAGE_FIELDS))
 
 
 def extract_issue(record: dict[str, Any]) -> str:
-    return compact_text(first_value(record, ("issue", "issue_description", "summary")))
+    direct_issue = compact_text(first_value(record, ISSUE_FIELDS))
+    if direct_issue:
+        return direct_issue
+    return compact_text(nested_first_value(record.get("user_inputs"), ISSUE_FIELDS))
 
 
 def conversation_id(record: dict[str, Any]) -> str:
     value = first_value(record, CONVERSATION_ID_FIELDS)
+    if value is None:
+        for messages in message_lists(record):
+            value = nested_first_value(messages, ("cid",))
+            if value is not None:
+                break
     # If no conversation key exists, do not accidentally join unrelated records.
     return str(value if value is not None else record.get("id", "unknown"))
 
@@ -196,7 +257,10 @@ def sort_value(record: dict[str, Any]) -> tuple[int, str]:
 def has_customer_context(record: dict[str, Any], prior_context: bool = False) -> bool:
     if prior_context:
         return True
-    return first_value(record, CUSTOMER_FIELDS) is not None
+    return (
+        first_value(record, CUSTOMER_FIELDS) is not None
+        or nested_first_value(record.get("user_inputs"), CUSTOMER_FIELDS) is not None
+    )
 
 
 def matches(text: str, patterns: Iterable[re.Pattern[str]]) -> bool:
@@ -301,6 +365,11 @@ def label_records(
         customer_context = False
 
         for record in conversation_records:
+            user_text = extract_user_text(record)
+            issue = extract_issue(record)
+            record_has_customer_context = has_customer_context(
+                record, customer_context
+            )
             prediction = classify(
                 record,
                 active_ticket=active_ticket,
@@ -312,15 +381,18 @@ def label_records(
                 active_ticket = True
 
             label = {
-                    "source_id": record.get("id"),
-                    "conversation_id": conv_id,
-                    "classification.intent": prediction.intent,
-                    "classification.confidence": prediction.confidence,
-                    "classification.reason": prediction.reason,
-                    "classification.needs_human_review": prediction.needs_human_review,
-                    "classification.version": "rules-v1",
-                    "classification.classified_at": classified_at,
-                }
+                "source_id": record.get("id"),
+                "conversation_id": conv_id,
+                "extracted.user_text": user_text,
+                "extracted.issue": issue,
+                "extracted.has_customer_context": record_has_customer_context,
+                "classification.intent": prediction.intent,
+                "classification.confidence": prediction.confidence,
+                "classification.reason": prediction.reason,
+                "classification.needs_human_review": prediction.needs_human_review,
+                "classification.version": "rules-v2",
+                "classification.classified_at": classified_at,
+            }
 
             if include_source_fields:
                 # Prefix source fields to avoid collisions with classification data.
@@ -488,4 +560,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
