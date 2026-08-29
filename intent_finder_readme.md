@@ -27,7 +27,7 @@ In the source data, a typical message looks like this:
 
 The script looks through `messages` for entries where `type` is `user`, `customer`, or `human`. It uses the latest matching message and reads the text from `data.content`. The CID comes from `data.cid`.
 
-Some records do not contain a usable message. In that case, the script checks `user_inputs` for a request or issue summary. It also checks `user_inputs` for customer and device identifiers such as BAN, IMEI, MSISDN, account number, subscriber ID, and impacted device.
+Some records do not contain a usable message. In that case, the script checks `user_inputs` for a request or issue summary. It also checks `user_inputs` for customer and device identifiers such as BAN, IMEI, MSISDN, account number, subscriber ID, and impacted device. `user_inputs` may arrive as an object, a list, or a JSON string; all three forms are decoded and flattened.
 
 The extraction order is:
 
@@ -183,6 +183,17 @@ The most useful review columns are:
 | `classification.version` | Rule-set version |
 
 The confidence values are fixed values assigned to rules. They are not probabilities learned from historical data.
+
+The original nested `source.user_inputs` column is omitted. Its values appear as separate columns such as:
+
+```text
+extracted.user_inputs.device.impactedDeviceType
+extracted.user_inputs.device.impactedDevice
+extracted.user_inputs.output_type
+extracted.user_inputs.category
+extracted.user_inputs.location.latitude
+extracted.user_inputs.location.longitude
+```
 
 ## Example audit
 

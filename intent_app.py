@@ -154,6 +154,23 @@ def nested_dict(record: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def parse_json_value(value: Any) -> Any:
+    """Decode object/array JSON strings while leaving normal strings unchanged."""
+    if not isinstance(value, str):
+        return value
+    candidate = value.strip()
+    if not candidate or candidate[0] not in "[{":
+        return value
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        return value
+
+
+def user_inputs(record: dict[str, Any]) -> Any:
+    return parse_json_value(record.get("user_inputs"))
+
+
 def first_value(record: dict[str, Any], fields: Iterable[str]) -> Any:
     conversation = nested_dict(record)
     for source in (record, conversation):
@@ -223,7 +240,7 @@ def extract_user_text_with_source(record: dict[str, Any]) -> tuple[str, str]:
             return user_messages[-1], "messages[].data.content"
 
     user_input_text = compact_text(
-        nested_first_value(record.get("user_inputs"), MESSAGE_FIELDS + ISSUE_FIELDS)
+        nested_first_value(user_inputs(record), MESSAGE_FIELDS + ISSUE_FIELDS)
     )
     if user_input_text:
         return user_input_text, "user_inputs"
@@ -240,7 +257,7 @@ def extract_issue(record: dict[str, Any]) -> str:
     direct_issue = compact_text(first_value(record, ISSUE_FIELDS))
     if direct_issue:
         return direct_issue
-    return compact_text(nested_first_value(record.get("user_inputs"), ISSUE_FIELDS))
+    return compact_text(nested_first_value(user_inputs(record), ISSUE_FIELDS))
 
 
 def conversation_id(record: dict[str, Any]) -> str:
@@ -266,7 +283,7 @@ def has_customer_context(record: dict[str, Any], prior_context: bool = False) ->
         return True
     return (
         first_value(record, CUSTOMER_FIELDS) is not None
-        or nested_first_value(record.get("user_inputs"), CUSTOMER_FIELDS) is not None
+        or nested_first_value(user_inputs(record), CUSTOMER_FIELDS) is not None
     )
 
 
@@ -367,6 +384,7 @@ def flatten_record(
 
 def flatten_user_inputs(value: Any) -> dict[str, Any]:
     """Flatten user_inputs into stable, review-friendly extracted columns."""
+    value = parse_json_value(value)
     prefix = "extracted.user_inputs"
     if isinstance(value, list):
         if len(value) == 1 and isinstance(value[0], dict):
@@ -435,9 +453,11 @@ def label_records(
 
             if include_source_fields:
                 # Prefix source fields to avoid collisions with classification data.
+                source_record = dict(record)
+                source_record.pop("user_inputs", None)
                 source = {
                     f"source.{key}": value
-                    for key, value in flatten_record(record).items()
+                    for key, value in flatten_record(source_record).items()
                 }
                 label = {**source, **label}
 

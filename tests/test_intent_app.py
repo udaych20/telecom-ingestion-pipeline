@@ -96,6 +96,30 @@ class IntentExtractionTests(unittest.TestCase):
             "15551234567",
         )
 
+    def test_parses_and_flattens_json_string_user_inputs(self):
+        record = screenshot_style_record("Check device status")
+        record["user_inputs"] = (
+            '{"device":{"impactedDeviceType":"MSISDN",'
+            '"impactedDevice":"15180157401"},'
+            '"output_type":"technical","category":"Other",'
+            '"location":{"latitude":null,"longitude":null}}'
+        )
+
+        label = label_records([record], include_source_fields=True)[0]
+
+        self.assertEqual(
+            label["extracted.user_inputs.device.impactedDeviceType"],
+            "MSISDN",
+        )
+        self.assertEqual(
+            label["extracted.user_inputs.device.impactedDevice"],
+            "15180157401",
+        )
+        self.assertEqual(label["extracted.user_inputs.output_type"], "technical")
+        self.assertEqual(label["extracted.user_inputs.category"], "Other")
+        self.assertIsNone(label["extracted.user_inputs.location.latitude"])
+        self.assertNotIn("source.user_inputs", label)
+
     def test_ticket_intent_remains_sticky_within_nested_cid(self):
         labels = label_records([
             screenshot_style_record("Create a support ticket", record_id="first"),
