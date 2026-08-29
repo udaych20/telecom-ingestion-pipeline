@@ -63,8 +63,17 @@ class IntentExtractionTests(unittest.TestCase):
             labels[0]["extracted.user_text"],
             "Customer is troubleshooting Apple watch",
         )
+        self.assertEqual(
+            labels[0]["extracted.user_text[messages[].data.content]"],
+            "Customer is troubleshooting Apple watch",
+        )
+        self.assertEqual(
+            labels[0]["extracted.user_text.source"],
+            "messages[].data.content",
+        )
         self.assertTrue(labels[0]["extracted.has_customer_context"])
         self.assertEqual(labels[0]["classification.intent"], "rca")
+        self.assertEqual(labels[0]["classification.rule"], "rca.issue_diagnosis")
         self.assertEqual(labels[0]["classification.version"], "rules-v2")
 
     def test_ticket_intent_remains_sticky_within_nested_cid(self):

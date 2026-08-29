@@ -136,6 +136,7 @@ ISSUE_FIELDS = (
 class Prediction:
     intent: str
     confidence: float
+    rule: str
     reason: str
     needs_human_review: bool
 
@@ -208,8 +209,8 @@ def message_text(message: dict[str, Any]) -> str:
     )
 
 
-def extract_user_text(record: dict[str, Any]) -> str:
-    """Return only a user utterance, never issue/assistant summaries by default."""
+def extract_user_text_with_source(record: dict[str, Any]) -> tuple[str, str]:
+    """Return the selected user utterance and its source path."""
     for messages in message_lists(record):
         user_messages = [
             message_text(message)
@@ -219,14 +220,20 @@ def extract_user_text(record: dict[str, Any]) -> str:
         ]
         user_messages = [text for text in user_messages if text]
         if user_messages:
-            return user_messages[-1]
+            return user_messages[-1], "messages[].data.content"
 
     user_input_text = compact_text(
         nested_first_value(record.get("user_inputs"), MESSAGE_FIELDS + ISSUE_FIELDS)
     )
     if user_input_text:
-        return user_input_text
-    return compact_text(first_value(record, MESSAGE_FIELDS))
+        return user_input_text, "user_inputs"
+    direct_text = compact_text(first_value(record, MESSAGE_FIELDS))
+    return direct_text, "direct_message_field" if direct_text else "not_found"
+
+
+def extract_user_text(record: dict[str, Any]) -> str:
+    """Return only a user utterance, never an assistant response."""
+    return extract_user_text_with_source(record)[0]
 
 
 def extract_issue(record: dict[str, Any]) -> str:
@@ -281,38 +288,45 @@ def classify(
     # explicit workflow-complete flag so persistence can end deterministically.
     if active_ticket:
         return Prediction(
-            "ticket", 0.98, "Continuation of an active ticket workflow.", False
+            "ticket", 0.98, "ticket.active_workflow",
+            "Continuation of an active ticket workflow.", False
         )
 
     if TICKET_ID_RE.search(text) or matches(text, TICKET_PATTERNS):
         return Prediction(
-            "ticket", 0.98, "Explicit ticket/case reference or action.", False
+            "ticket", 0.98, "ticket.explicit_reference_or_action",
+            "Explicit ticket/case reference or action.", False
         )
 
     if matches(text, MODIFY_PATTERNS):
         return Prediction(
-            "modify", 0.91, "Customer configuration change was requested.", False
+            "modify", 0.91, "modify.configuration_change",
+            "Customer configuration change was requested.", False
         )
 
     if matches(text, RCA_PATTERNS):
         return Prediction(
-            "rca", 0.90, "Customer issue investigation or diagnosis was requested.", False
+            "rca", 0.90, "rca.issue_diagnosis",
+            "Customer issue investigation or diagnosis was requested.", False
         )
 
     if text and customer_context and matches(text, QUERY_PATTERNS):
         return Prediction(
-            "query", 0.90, "One focused question about a known customer.", False
+            "query", 0.90, "query.customer_question",
+            "One focused question about a known customer.", False
         )
 
     if text and not customer_context and matches(text, GENERAL_PATTERNS):
         return Prediction(
-            "general", 0.78, "General question without customer context.", True
+            "general", 0.78, "general.non_customer_question",
+            "General question without customer context.", True
         )
 
     if not text and issue:
         return Prediction(
             "clarification_needed",
             0.72,
+            "clarification.missing_user_text",
             "Issue summary exists, but no explicit user request was found.",
             True,
         )
@@ -320,6 +334,7 @@ def classify(
     return Prediction(
         "clarification_needed",
         0.55,
+        "clarification.no_rule_match",
         "No high-confidence intent rule matched the user request.",
         True,
     )
@@ -365,7 +380,7 @@ def label_records(
         customer_context = False
 
         for record in conversation_records:
-            user_text = extract_user_text(record)
+            user_text, user_text_source = extract_user_text_with_source(record)
             issue = extract_issue(record)
             record_has_customer_context = has_customer_context(
                 record, customer_context
@@ -384,10 +399,17 @@ def label_records(
                 "source_id": record.get("id"),
                 "conversation_id": conv_id,
                 "extracted.user_text": user_text,
+                "extracted.user_text[messages[].data.content]": (
+                    user_text
+                    if user_text_source == "messages[].data.content"
+                    else ""
+                ),
+                "extracted.user_text.source": user_text_source,
                 "extracted.issue": issue,
                 "extracted.has_customer_context": record_has_customer_context,
                 "classification.intent": prediction.intent,
                 "classification.confidence": prediction.confidence,
+                "classification.rule": prediction.rule,
                 "classification.reason": prediction.reason,
                 "classification.needs_human_review": prediction.needs_human_review,
                 "classification.version": "rules-v2",
