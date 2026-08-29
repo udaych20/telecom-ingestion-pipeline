@@ -23,7 +23,7 @@ import json
 import os
 import re
 from collections import Counter, defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -280,6 +280,7 @@ def classify(
     active_ticket: bool = False,
     prior_customer_context: bool = False,
 ) -> Prediction:
+    """Classify one record using the documented first-match rule order."""
     text = extract_user_text(record)
     issue = extract_issue(record)
     customer_context = has_customer_context(record, prior_customer_context)
@@ -367,6 +368,7 @@ def flatten_record(
 def label_records(
     records: list[dict[str, Any]], *, include_source_fields: bool = False
 ) -> list[dict[str, Any]]:
+    """Group records by CID, classify them in time order, and build CSV rows."""
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         grouped[conversation_id(record)].append(record)
