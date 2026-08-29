@@ -466,9 +466,25 @@ def label_records(
     return labels
 
 
-def load_cosmos_records(container: Any, max_records: int | None) -> list[dict[str, Any]]:
+def load_cosmos_records(
+    container: Any,
+    max_records: int | None,
+    workers: int = 1,
+) -> list[dict[str, Any]]:
+    """Read the source container, using Cosmos partition concurrency when requested."""
     records: list[dict[str, Any]] = []
-    for item in container.read_all_items():
+    if workers == 1:
+        items = container.read_all_items()
+    else:
+        # Cosmos manages the threads and continuation tokens internally.  Keeping
+        # that work in the SDK is safer than sharing one iterator across threads.
+        items = container.query_items(
+            query="SELECT * FROM c",
+            enable_cross_partition_query=True,
+            max_concurrency=workers,
+        )
+
+    for item in items:
         records.append(item)
         if max_records is not None and len(records) >= max_records:
             break
@@ -578,6 +594,7 @@ def main() -> None:
     container_name = required_env("COSMOS_CONTAINER")
     output_path = Path(os.environ.get("INTENT_OUTPUT", "intent_labels_all.csv"))
     max_records = env_int("INTENT_MAX_RECORDS")
+    workers = env_int("INTENT_MAX_WORKERS") or 1
     include_source_fields = env_bool("INTENT_INCLUDE_SOURCE_FIELDS", True)
     write_back = env_bool("INTENT_WRITE_BACK", False)
     target_container_name = os.environ.get(
@@ -589,7 +606,7 @@ def main() -> None:
     database = client.get_database_client(database_name)
     source_container = database.get_container_client(container_name)
 
-    records = load_cosmos_records(source_container, max_records)
+    records = load_cosmos_records(source_container, max_records, workers)
     labels = label_records(records, include_source_fields=include_source_fields)
     if output_path.suffix.lower() == ".csv":
         write_csv(output_path, labels)
@@ -608,6 +625,7 @@ def main() -> None:
     )
 
     print(f"Read {len(records):,} source records")
+    print(f"Cosmos read workers: {workers}")
     print(f"Created {len(labels):,} labels")
     for intent, count in sorted(counts.items()):
         print(f"  {intent}: {count:,}")
