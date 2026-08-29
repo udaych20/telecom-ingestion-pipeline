@@ -5,6 +5,7 @@ from intent_app import (
     conversation_id,
     extract_issue,
     extract_user_text,
+    find_missing_cosmos_records,
     label_records,
     load_cosmos_records,
 )
@@ -34,13 +35,13 @@ def screenshot_style_record(text, *, cid="cid-1", record_id="record-1"):
 
 
 class IntentExtractionTests(unittest.TestCase):
-    def test_parallel_cosmos_read_uses_configured_worker_count(self):
+    def test_worker_setting_does_not_reach_unsupported_cosmos_query(self):
         class Container:
             def __init__(self):
-                self.query_arguments = None
+                self.read_called = False
 
-            def query_items(self, **kwargs):
-                self.query_arguments = kwargs
+            def read_all_items(self):
+                self.read_called = True
                 return [{"id": "one"}, {"id": "two"}]
 
         container = Container()
@@ -48,9 +49,24 @@ class IntentExtractionTests(unittest.TestCase):
         records = load_cosmos_records(container, max_records=None, workers=10)
 
         self.assertEqual(len(records), 2)
-        self.assertEqual(container.query_arguments["query"], "SELECT * FROM c")
-        self.assertTrue(container.query_arguments["enable_cross_partition_query"])
-        self.assertEqual(container.query_arguments["max_concurrency"], 10)
+        self.assertTrue(container.read_called)
+
+    def test_finds_records_missing_from_the_first_cosmos_read(self):
+        class Container:
+            def query_items(self, **kwargs):
+                self.arguments = kwargs
+                return [
+                    {"id": "one", "_rid": "rid-one"},
+                    {"id": "two", "_rid": "rid-two"},
+                ]
+
+        missing, inventory_count = find_missing_cosmos_records(
+            Container(),
+            [{"id": "one", "_rid": "rid-one"}],
+        )
+
+        self.assertEqual(inventory_count, 2)
+        self.assertEqual(missing, [{"id": "two", "_rid": "rid-two"}])
 
     def test_extracts_nested_user_message_and_cid(self):
         record = screenshot_style_record("router is showing no internet connection")

@@ -471,24 +471,51 @@ def load_cosmos_records(
     max_records: int | None,
     workers: int = 1,
 ) -> list[dict[str, Any]]:
-    """Read the source container, using Cosmos partition concurrency when requested."""
-    records: list[dict[str, Any]] = []
-    if workers == 1:
-        items = container.read_all_items()
-    else:
-        # Cosmos manages the threads and continuation tokens internally.  Keeping
-        # that work in the SDK is safer than sharing one iterator across threads.
-        items = container.query_items(
-            query="SELECT * FROM c",
-            enable_cross_partition_query=True,
-            max_concurrency=workers,
+    """Read source records from Cosmos."""
+    if workers != 1:
+        print(
+            "INTENT_MAX_WORKERS is ignored by the synchronous Cosmos client; "
+            "using one reader"
         )
 
-    for item in items:
+    records: list[dict[str, Any]] = []
+    for item in container.read_all_items():
         records.append(item)
         if max_records is not None and len(records) >= max_records:
             break
     return records
+
+
+def cosmos_record_key(record: dict[str, Any]) -> str:
+    """Return the Cosmos-generated identity used when comparing two reads."""
+    resource_id = record.get("_rid")
+    if resource_id:
+        return f"rid:{resource_id}"
+
+    # _rid should exist on Cosmos records.  The fallback keeps local fixtures and
+    # exported test data useful without pretending that id alone is always unique.
+    return "record:" + json.dumps(record, sort_keys=True, default=str)
+
+
+def find_missing_cosmos_records(
+    container: Any,
+    exported_records: Iterable[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    """Run a fresh container query and return records absent from the first read."""
+    exported_keys = {cosmos_record_key(record) for record in exported_records}
+    missing: list[dict[str, Any]] = []
+    inventory_count = 0
+
+    items = container.query_items(
+        query="SELECT * FROM c",
+        enable_cross_partition_query=True,
+    )
+    for item in items:
+        inventory_count += 1
+        if cosmos_record_key(item) not in exported_keys:
+            missing.append(item)
+
+    return missing, inventory_count
 
 
 def write_jsonl(path: Path, labels: Iterable[dict[str, Any]]) -> None:
@@ -595,6 +622,10 @@ def main() -> None:
     output_path = Path(os.environ.get("INTENT_OUTPUT", "intent_labels_all.csv"))
     max_records = env_int("INTENT_MAX_RECORDS")
     workers = env_int("INTENT_MAX_WORKERS") or 1
+    find_missing = env_bool("INTENT_FIND_MISSING", False)
+    missing_output_path = Path(
+        os.environ.get("INTENT_MISSING_OUTPUT", "intent_labels_missing.csv")
+    )
     include_source_fields = env_bool("INTENT_INCLUDE_SOURCE_FIELDS", True)
     write_back = env_bool("INTENT_WRITE_BACK", False)
     target_container_name = os.environ.get(
@@ -615,6 +646,44 @@ def main() -> None:
     else:
         raise ValueError("--output must end in .csv, .jsonl, or .ndjson")
 
+    missing_records: list[dict[str, Any]] = []
+    inventory_count: int | None = None
+    if find_missing:
+        if max_records is not None:
+            raise ValueError(
+                "INTENT_FIND_MISSING requires INTENT_MAX_RECORDS to be empty"
+            )
+        missing_records, inventory_count = find_missing_cosmos_records(
+            source_container,
+            records,
+        )
+        combined_labels = label_records(
+            [*records, *missing_records],
+            # Keep _rid during the comparison even when the main export hides
+            # source fields. It is removed below before writing when requested.
+            include_source_fields=True,
+        )
+        missing_keys = {cosmos_record_key(record) for record in missing_records}
+        missing_labels = [
+            label
+            for label in combined_labels
+            if (
+                f"rid:{label.get('source._rid')}" in missing_keys
+                if label.get("source._rid")
+                else False
+            )
+        ]
+        if not include_source_fields:
+            missing_labels = [
+                {
+                    key: value
+                    for key, value in label.items()
+                    if not key.startswith("source.")
+                }
+                for label in missing_labels
+            ]
+        write_csv(missing_output_path, missing_labels)
+
     if write_back:
         target = database.get_container_client(target_container_name)
         write_labels_to_container(target, labels)
@@ -625,12 +694,16 @@ def main() -> None:
     )
 
     print(f"Read {len(records):,} source records")
-    print(f"Cosmos read workers: {workers}")
+    print("Cosmos read workers: 1")
     print(f"Created {len(labels):,} labels")
     for intent, count in sorted(counts.items()):
         print(f"  {intent}: {count:,}")
     print(f"Human review recommended: {review_count:,}")
     print(f"Local output: {output_path.resolve()}")
+    if find_missing:
+        print(f"Fresh Cosmos inventory: {inventory_count:,}")
+        print(f"Records missing from first read: {len(missing_records):,}")
+        print(f"Missing-record output: {missing_output_path.resolve()}")
     if write_back:
         print(f"Cosmos output container: {target_container_name}")
 
