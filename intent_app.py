@@ -365,6 +365,23 @@ def flatten_record(
     return flattened
 
 
+def flatten_user_inputs(value: Any) -> dict[str, Any]:
+    """Flatten user_inputs into stable, review-friendly extracted columns."""
+    prefix = "extracted.user_inputs"
+    if isinstance(value, list):
+        if len(value) == 1 and isinstance(value[0], dict):
+            return flatten_record(value[0], prefix=prefix)
+        flattened: dict[str, Any] = {}
+        for index, item in enumerate(value):
+            flattened.update(flatten_record(item, prefix=f"{prefix}.{index}"))
+        return flattened
+    if isinstance(value, dict):
+        return flatten_record(value, prefix=prefix)
+    if value not in (None, ""):
+        return {prefix: value}
+    return {}
+
+
 def label_records(
     records: list[dict[str, Any]], *, include_source_fields: bool = False
 ) -> list[dict[str, Any]]:
@@ -382,8 +399,9 @@ def label_records(
         customer_context = False
 
         for record in conversation_records:
-            user_text, user_text_source = extract_user_text_with_source(record)
+            user_text, _ = extract_user_text_with_source(record)
             issue = extract_issue(record)
+            extracted_user_inputs = flatten_user_inputs(record.get("user_inputs"))
             record_has_customer_context = has_customer_context(
                 record, customer_context
             )
@@ -400,13 +418,10 @@ def label_records(
             label = {
                 "source_id": record.get("id"),
                 "conversation_id": conv_id,
-                "extracted.user_text": user_text,
                 "extracted.user_text[messages[].data.content]": (
                     user_text
-                    if user_text_source == "messages[].data.content"
-                    else ""
                 ),
-                "extracted.user_text.source": user_text_source,
+                **extracted_user_inputs,
                 "extracted.issue": issue,
                 "extracted.has_customer_context": record_has_customer_context,
                 "classification.intent": prediction.intent,

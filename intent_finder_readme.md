@@ -36,7 +36,7 @@ The extraction order is:
 3. a direct message field on the record
 4. `not_found`
 
-The selected source is written to `extracted.user_text.source`, so we do not have to guess which fallback was used.
+The selected text is written to `extracted.user_text[messages[].data.content]`. This keeps the normal source path visible in the CSV header and avoids a second duplicate user-text column. When that path is missing, the same column contains the `user_inputs` or direct-field fallback selected by the extraction order above.
 
 ## How classification works
 
@@ -171,9 +171,8 @@ The most useful review columns are:
 | Column | Description |
 |---|---|
 | `source.messages` | Original message array |
-| `extracted.user_text` | Text used for classification |
-| `extracted.user_text[messages[].data.content]` | Text when it came from the normal message path |
-| `extracted.user_text.source` | Exact extraction source or fallback |
+| `extracted.user_text[messages[].data.content]` | Text used for classification; the normal source path is visible in the header |
+| `extracted.user_inputs.*` | Individual fields flattened from the `user_inputs` object or list |
 | `extracted.issue` | Extracted issue summary |
 | `extracted.has_customer_context` | Whether customer/device context was found |
 | `classification.intent` | Assigned intent |
@@ -192,8 +191,7 @@ source.messages:
   messages[].data.content = "router is showing no internet connection"
 
 extracted:
-  extracted.user_text = "router is showing no internet connection"
-  extracted.user_text.source = "messages[].data.content"
+  extracted.user_text[messages[].data.content] = "router is showing no internet connection"
 
 classification:
   classification.intent = "rca"

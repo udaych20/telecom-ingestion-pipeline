@@ -60,21 +60,41 @@ class IntentExtractionTests(unittest.TestCase):
 
         self.assertEqual(labels[0]["conversation_id"], "cid-1")
         self.assertEqual(
-            labels[0]["extracted.user_text"],
-            "Customer is troubleshooting Apple watch",
-        )
-        self.assertEqual(
             labels[0]["extracted.user_text[messages[].data.content]"],
             "Customer is troubleshooting Apple watch",
         )
+        self.assertNotIn("extracted.user_text", labels[0])
+        self.assertNotIn("extracted.user_text.source", labels[0])
         self.assertEqual(
-            labels[0]["extracted.user_text.source"],
-            "messages[].data.content",
+            labels[0]["extracted.user_inputs.device.impactedDeviceType"],
+            "MSISDN",
+        )
+        self.assertEqual(
+            labels[0]["extracted.user_inputs.device.impactedDevice"],
+            "15551234567",
         )
         self.assertTrue(labels[0]["extracted.has_customer_context"])
         self.assertEqual(labels[0]["classification.intent"], "rca")
         self.assertEqual(labels[0]["classification.rule"], "rca.issue_diagnosis")
         self.assertEqual(labels[0]["classification.version"], "rules-v2")
+
+    def test_flattens_single_item_user_inputs_list_without_index(self):
+        record = screenshot_style_record("Check account status")
+        record["user_inputs"] = [{
+            "issue_summary": "Check account status",
+            "device": {"impactedDevice": "15551234567"},
+        }]
+
+        label = label_records([record])[0]
+
+        self.assertEqual(
+            label["extracted.user_inputs.issue_summary"],
+            "Check account status",
+        )
+        self.assertEqual(
+            label["extracted.user_inputs.device.impactedDevice"],
+            "15551234567",
+        )
 
     def test_ticket_intent_remains_sticky_within_nested_cid(self):
         labels = label_records([
