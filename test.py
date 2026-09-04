@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import json
 from pathlib import Path
@@ -12,7 +13,8 @@ from typing import Any
 DEFAULT_INPUT = Path("Train_50_intent_rca_query.csv")
 ALLOWED_INTENTS = {"rca", "query"}
 SYSTEM_PROMPT = (
-    "Classify the telecom interaction as rca or query. Return only the label."
+    "Classify the telecom interaction as rca or query. Return JSON containing "
+    "only intent_predicted."
 )
 
 
@@ -120,27 +122,42 @@ def add_user_labels(messages: list[dict[str, Any]], intent: str) -> int:
 def build_training_record(
     messages: list[dict[str, Any]], intent: str, row_number: int
 ) -> dict[str, list[dict[str, str]]]:
-    """Convert the source type/data messages to Azure chat-training format."""
-    transcript_parts: list[str] = []
-    for message in messages:
+    """Wrap source messages in Azure format without leaking the known label."""
+    inference_messages = copy.deepcopy(messages)
+    user_messages = 0
+    for message in inference_messages:
         data = message.get("data")
-        data = data if isinstance(data, dict) else {}
-        message_type = str(data.get("type") or message.get("type") or "message").strip()
-        content = data.get("content", message.get("content", ""))
-        if content is None:
+        top_level_type = str(message.get("type", "")).strip().lower()
+        data_type = (
+            str(data.get("type", "")).strip().lower()
+            if isinstance(data, dict)
+            else ""
+        )
+        if top_level_type != "user" and data_type != "user":
             continue
-        content_text = str(content).strip()
-        if content_text:
-            transcript_parts.append(f"{message_type.upper()}: {content_text}")
 
-    if not transcript_parts:
-        raise ValueError(f"row {row_number}: source.messages has no usable content")
+        if not isinstance(data, dict):
+            data = {}
+            message["data"] = data
+        data.pop("label", None)
+        data["intent_predicted"] = ""
+        user_messages += 1
+
+    if user_messages == 0:
+        raise ValueError(f"row {row_number}: no type=user message was found")
+
+    input_json = json.dumps(
+        inference_messages, ensure_ascii=False, separators=(",", ":")
+    )
+    expected_json = json.dumps(
+        {"intent_predicted": intent}, ensure_ascii=False, separators=(",", ":")
+    )
 
     return {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": "\n\n".join(transcript_parts)},
-            {"role": "assistant", "content": intent},
+            {"role": "user", "content": input_json},
+            {"role": "assistant", "content": expected_json},
         ]
     }
 
