@@ -1,4 +1,4 @@
-"""Build message JSONL and a filterable CSV from exported chat data."""
+"""Build Azure Foundry fine-tuning JSONL and a filterable CSV."""
 
 from __future__ import annotations
 
@@ -11,13 +11,16 @@ from typing import Any
 
 DEFAULT_INPUT = Path("Train_50_intent_rca_query.csv")
 ALLOWED_INTENTS = {"rca", "query"}
+SYSTEM_PROMPT = (
+    "Classify the telecom interaction as rca or query. Return only the label."
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Add classification.intent as data.label to user messages, create an "
-            "existing-format messages JSONL file, and create a flattened CSV."
+            "Azure Foundry fine-tuning JSONL file, and create a flattened CSV."
         )
     )
     parser.add_argument("csv_file", nargs="?", type=Path, default=DEFAULT_INPUT)
@@ -114,6 +117,34 @@ def add_user_labels(messages: list[dict[str, Any]], intent: str) -> int:
     return changed
 
 
+def build_training_record(
+    messages: list[dict[str, Any]], intent: str, row_number: int
+) -> dict[str, list[dict[str, str]]]:
+    """Convert the source type/data messages to Azure chat-training format."""
+    transcript_parts: list[str] = []
+    for message in messages:
+        data = message.get("data")
+        data = data if isinstance(data, dict) else {}
+        message_type = str(data.get("type") or message.get("type") or "message").strip()
+        content = data.get("content", message.get("content", ""))
+        if content is None:
+            continue
+        content_text = str(content).strip()
+        if content_text:
+            transcript_parts.append(f"{message_type.upper()}: {content_text}")
+
+    if not transcript_parts:
+        raise ValueError(f"row {row_number}: source.messages has no usable content")
+
+    return {
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": "\n\n".join(transcript_parts)},
+            {"role": "assistant", "content": intent},
+        ]
+    }
+
+
 def flatten(value: Any, prefix: str = "") -> dict[str, Any]:
     result: dict[str, Any] = {}
     if isinstance(value, dict):
@@ -159,12 +190,16 @@ def convert(input_path: Path, jsonl_path: Path, flat_csv_path: Path) -> dict[str
             stats["read"] += 1
             try:
                 intent = extract_intent(row.get(intent_column, "") or "", row_number)
-                if intent.casefold() not in ALLOWED_INTENTS:
+                intent = intent.casefold()
+                if intent not in ALLOWED_INTENTS:
                     stats["filtered"] += 1
                     continue
 
                 parsed = parse_json_cell(row.get(messages_column, "") or "", row_number)
                 messages = extract_messages(parsed, row_number)
+                # Build the model input before adding the answer-bearing label,
+                # otherwise the expected answer would leak into the prompt.
+                record = build_training_record(messages, intent, row_number)
                 user_count = add_user_labels(messages, intent)
                 if user_count == 0:
                     raise ValueError(f"row {row_number}: no type=user message was found")
@@ -173,9 +208,6 @@ def convert(input_path: Path, jsonl_path: Path, flat_csv_path: Path) -> dict[str
                 print(f"Skipped {exc}")
                 continue
 
-            # Preserve the source.messages type/data schema. Each JSONL line is
-            # one object whose messages array contains the updated source data.
-            record = {"messages": messages}
             duplicate_key = json.dumps(record, sort_keys=True, ensure_ascii=False)
             if duplicate_key in seen:
                 stats["skipped"] += 1
@@ -198,7 +230,8 @@ def convert(input_path: Path, jsonl_path: Path, flat_csv_path: Path) -> dict[str
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     flat_csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with jsonl_path.open("w", encoding="utf-8", newline="\n") as jsonl_file:
+    # Azure Foundry requires UTF-8 with a byte-order mark (BOM).
+    with jsonl_path.open("w", encoding="utf-8-sig", newline="\n") as jsonl_file:
         for record in fine_tune_records:
             jsonl_file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
