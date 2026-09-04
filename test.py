@@ -1,4 +1,4 @@
-"""Build fine-tuning JSONL and a filterable CSV from exported chat data."""
+"""Build message JSONL and a filterable CSV from exported chat data."""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ from typing import Any
 
 
 DEFAULT_INPUT = Path("Train_50_intent_rca_query.csv")
-SYSTEM_PROMPT = "Analyze the provided telecom record and identify the appropriate intent."
+ALLOWED_INTENTS = {"rca", "query"}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Add classification.intent as data.label to user messages, create an "
-            "OpenAI-style fine-tuning JSONL file, and create a flattened CSV."
+            "existing-format messages JSONL file, and create a flattened CSV."
         )
     )
     parser.add_argument("csv_file", nargs="?", type=Path, default=DEFAULT_INPUT)
@@ -139,7 +139,13 @@ def convert(input_path: Path, jsonl_path: Path, flat_csv_path: Path) -> dict[str
     fine_tune_records: list[dict[str, Any]] = []
     flat_rows: list[dict[str, Any]] = []
     seen: set[str] = set()
-    stats = {"read": 0, "written": 0, "skipped": 0, "user_messages": 0}
+    stats = {
+        "read": 0,
+        "written": 0,
+        "filtered": 0,
+        "skipped": 0,
+        "user_messages": 0,
+    }
 
     with input_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
@@ -152,9 +158,13 @@ def convert(input_path: Path, jsonl_path: Path, flat_csv_path: Path) -> dict[str
         for row_number, row in enumerate(reader, start=2):
             stats["read"] += 1
             try:
+                intent = extract_intent(row.get(intent_column, "") or "", row_number)
+                if intent.casefold() not in ALLOWED_INTENTS:
+                    stats["filtered"] += 1
+                    continue
+
                 parsed = parse_json_cell(row.get(messages_column, "") or "", row_number)
                 messages = extract_messages(parsed, row_number)
-                intent = extract_intent(row.get(intent_column, "") or "", row_number)
                 user_count = add_user_labels(messages, intent)
                 if user_count == 0:
                     raise ValueError(f"row {row_number}: no type=user message was found")
@@ -163,16 +173,9 @@ def convert(input_path: Path, jsonl_path: Path, flat_csv_path: Path) -> dict[str
                 print(f"Skipped {exc}")
                 continue
 
-            record = {
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": json.dumps(messages, ensure_ascii=False),
-                    },
-                    {"role": "assistant", "content": intent},
-                ]
-            }
+            # Preserve the source.messages type/data schema. Each JSONL line is
+            # one object whose messages array contains the updated source data.
+            record = {"messages": messages}
             duplicate_key = json.dumps(record, sort_keys=True, ensure_ascii=False)
             if duplicate_key in seen:
                 stats["skipped"] += 1
@@ -220,6 +223,7 @@ def main() -> None:
     print(f"Input rows            : {stats['read']}")
     print(f"Fine-tuning records   : {stats['written']}")
     print(f"Labeled user messages : {stats['user_messages']}")
+    print(f"Filtered other labels : {stats['filtered']}")
     print(f"Skipped rows          : {stats['skipped']}")
     print(f"JSONL output          : {jsonl_path}")
     print(f"CSV output            : {flat_csv_path}")
