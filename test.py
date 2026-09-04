@@ -122,7 +122,7 @@ def add_user_labels(messages: list[dict[str, Any]], intent: str) -> int:
 def build_training_record(
     messages: list[dict[str, Any]], intent: str, row_number: int
 ) -> dict[str, list[dict[str, str]]]:
-    """Wrap source messages in Azure format without leaking the known label."""
+    """Wrap the annotated source messages in Azure chat-training format."""
     inference_messages = copy.deepcopy(messages)
     user_messages = 0
     for message in inference_messages:
@@ -139,7 +139,6 @@ def build_training_record(
         if not isinstance(data, dict):
             data = {}
             message["data"] = data
-        data.pop("label", None)
         data["intent_predicted"] = ""
         user_messages += 1
 
@@ -150,7 +149,7 @@ def build_training_record(
         inference_messages, ensure_ascii=False, separators=(",", ":")
     )
     expected_json = json.dumps(
-        {"intent_predicted": intent}, ensure_ascii=False, separators=(",", ":")
+        {"intent_predicted": ""}, ensure_ascii=False, separators=(",", ":")
     )
 
     return {
@@ -214,12 +213,10 @@ def convert(input_path: Path, jsonl_path: Path, flat_csv_path: Path) -> dict[str
 
                 parsed = parse_json_cell(row.get(messages_column, "") or "", row_number)
                 messages = extract_messages(parsed, row_number)
-                # Build the model input before adding the answer-bearing label,
-                # otherwise the expected answer would leak into the prompt.
-                record = build_training_record(messages, intent, row_number)
                 user_count = add_user_labels(messages, intent)
                 if user_count == 0:
                     raise ValueError(f"row {row_number}: no type=user message was found")
+                record = build_training_record(messages, intent, row_number)
             except ValueError as exc:
                 stats["skipped"] += 1
                 print(f"Skipped {exc}")
