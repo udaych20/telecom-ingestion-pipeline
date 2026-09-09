@@ -38,6 +38,15 @@ python app.py --all
 
 After checking the output, set `BATCH_LIMIT=0` to process every chat. Failures are recorded in `output/failed_interactions.csv` without stopping the batch.
 
+For a CSV-only time-range export, include a timezone in the start and end values:
+
+```powershell
+python app.py --all --start-time "2026-09-04T18:00:00+05:30" --end-time "2026-09-09T18:00:00+05:30" --output-format csv
+```
+
+Omit `--end-time` to use the time when the command starts. This range is based on
+Cosmos `_ts`, which represents the chat document's latest insert or update time.
+
 To keep only records with matches in all four containers:
 
 ```powershell

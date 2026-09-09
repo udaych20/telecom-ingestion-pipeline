@@ -24,6 +24,9 @@ python -m py_compile app.py
 - Invalid ingestion mode fails clearly.
 - `BATCH_LIMIT=0`, a positive limit, and single-ID behavior.
 - Batch boundaries for fewer than, exactly, and more than `BATCH_SIZE` IDs.
+- Time-range parsing requires a timezone and normalizes values to UTC.
+- Historical time ranges apply inclusive `_ts` parameters to the chat query.
+- CSV-only export does not create the assembled interaction JSONL file.
 - Complete-only mode exports all four sources and skips every incomplete combination.
 - Batch processing continues after one interaction fails.
 - Live mode is rejected while `LIVE_STREAM_DATA_ENABLED=false`.

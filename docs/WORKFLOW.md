@@ -45,6 +45,13 @@ No schema assumption should move into production code until it is documented and
 
 `python app.py --all` enumerates distinct chat CIDs and applies the normal workflow using one Cosmos connection. CIDs are streamed in groups of `BATCH_SIZE`. `BATCH_LIMIT=0` means every enumerated CID; a positive value restricts a trial run. Failed interactions are appended to `failed_interactions.csv`, and processing continues.
 
+Supplying `--start-time` and optional `--end-time` limits enumeration using the
+chat document's Cosmos-managed `_ts`. Both bounds are inclusive. The related
+tool, context, and feedback lookups remain correlation-based and return the full
+linked records for each selected chat CID. `--output-format csv` creates only the
+assembled interaction CSV; use a fresh `OUTPUT_DIR` for an isolated export because
+output files are append-only.
+
 `python app.py --all-complete` uses the same batches but exports only interactions containing chat history, all-tools context, UAT context, and feedback. Missing any source causes a skip, not a failure. The final console line reports succeeded, skipped, and failed counts.
 
 ## Live workflow

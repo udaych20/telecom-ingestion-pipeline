@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add timezone-aware historical `_ts` filtering and CSV-only/JSONL-only export
+  options to `app.py` batch commands.
+
 - Added Cosmos interaction reconstruction using `DefaultAzureCredential`.
 - Added complete CSV and JSONL interaction logs.
 - Added configurable LLM and knowledge-graph preparation outputs.

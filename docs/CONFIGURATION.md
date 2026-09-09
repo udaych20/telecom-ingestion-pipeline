@@ -41,6 +41,11 @@ Do not place client secrets, access tokens, or Cosmos account keys in `.env`. `D
 
 `BATCH_LIMIT` and `BATCH_SIZE` affect `--all` and `--all-complete`, not a single chat CID. `BATCH_LIMIT` must be non-negative and `BATCH_SIZE` must be greater than zero. Environment settings are loaded once when the process starts.
 
+Historical commands accept `--start-time` and `--end-time` as ISO 8601 values
+with an explicit timezone. The bounds are inclusive and filter the chat document's
+Cosmos-managed `_ts` value. If `--end-time` is omitted, the process start time is
+used. Use `--output-format csv`, `jsonl`, or `both`; the default is `both`.
+
 `LIVE_STREAM_DATA_ENABLED` does not change historical runs. It gates only
 `--live`. Event Hubs uses `DefaultAzureCredential`; Kafka secrets should be
 injected by the host or a secret store instead of being committed to `.env`.

@@ -42,6 +42,14 @@ python app.py "CHAT-CID"
 
 For a trial dataset run, set `BATCH_LIMIT=10` in `.env` and run `python app.py --all`. Set `BATCH_LIMIT=0` only when ready to process every chat.
 
+To export only chat documents inserted or last updated during a time range, filter
+their Cosmos `_ts` value. Timezone-aware values are converted to UTC, and an
+omitted end time means the time when the process starts:
+
+```powershell
+python app.py --all --start-time "2026-09-04T18:00:00+05:30" --output-format csv
+```
+
 To export only fully joined interactions, run `python app.py --all-complete`. It writes an interaction only when chat, all-tools context, UAT context, and feedback are all present. Incomplete interactions are skipped.
 
 The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.

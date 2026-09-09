@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import sys
@@ -253,11 +254,13 @@ def process_live_event(database, event):
         print(f"Processed live interaction {cid} from event {event['id']}")
 
 
-def save_interaction(interaction):
-    save_interaction_csv(interaction)
-    path = os.path.join(OUTPUT_DIR, "interactions.jsonl")
-    with open(path, "a", encoding="utf-8") as file:
-        file.write(json.dumps(interaction, default=str) + "\n")
+def save_interaction(interaction, output_format="both"):
+    if output_format in ("csv", "both"):
+        save_interaction_csv(interaction)
+    if output_format in ("jsonl", "both"):
+        path = os.path.join(OUTPUT_DIR, "interactions.jsonl")
+        with open(path, "a", encoding="utf-8") as file:
+            file.write(json.dumps(interaction, default=str) + "\n")
 
     if INGESTION_MODE == "llm":
         ingest_for_llm(interaction)
@@ -267,16 +270,29 @@ def save_interaction(interaction):
         raise ValueError("INGESTION_MODE must be none, llm, or knowledge_graph")
 
 
-def get_chat_id_batches(database):
+def get_chat_id_batches(database, start_time=None, end_time=None):
     chat = database.get_container_client(CHAT_CONTAINER)
-    sql = """
+    filters = ["IS_DEFINED(message.data.cid)"]
+    parameters = []
+    if start_time is not None:
+        filters.append("c._ts >= @start_ts")
+        parameters.append({"name": "@start_ts", "value": int(start_time.timestamp())})
+    if end_time is not None:
+        filters.append("c._ts <= @end_ts")
+        parameters.append({"name": "@end_ts", "value": int(end_time.timestamp())})
+
+    sql = f"""
         SELECT message.data.cid AS cid, c._ts AS ts
         FROM c
         JOIN message IN c.messages
-        WHERE IS_DEFINED(message.data.cid)
+        WHERE {' AND '.join(filters)}
         ORDER BY c._ts DESC
     """
-    rows = chat.query_items(sql, enable_cross_partition_query=True)
+    rows = chat.query_items(
+        sql,
+        parameters=parameters,
+        enable_cross_partition_query=True,
+    )
     batch = []
     count = 0
     seen = set()
@@ -346,14 +362,78 @@ def process_batch(database, interaction_ids):
                 yield interaction_id, None, error
 
 
-if __name__ == "__main__":
-    if not ENDPOINT or len(sys.argv) != 2:
-        print(
-            "Usage: python app.py <chat-id> | --all | --all-complete | "
-            "--timestamps | --live"
+def parse_iso_time(value):
+    normalized = value.strip()
+    if normalized.endswith(("Z", "z")):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "must be an ISO 8601 time, for example 2026-09-04T18:00:00+05:30"
+        ) from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise argparse.ArgumentTypeError(
+            "must include a timezone offset, for example +05:30 or Z"
         )
-        print("Set COSMOS_ENDPOINT and optionally COSMOS_DATABASE first.")
-        raise SystemExit(1)
+    return parsed.astimezone(timezone.utc)
+
+
+def parse_arguments(arguments):
+    parser = argparse.ArgumentParser(
+        description="Export correlated telecom interactions from Cosmos DB."
+    )
+    parser.add_argument("chat_id", nargs="?", help="one chat CID to export")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--all", action="store_true", help="export all matching chats")
+    modes.add_argument(
+        "--all-complete",
+        action="store_true",
+        help="export matching chats only when all four sources are present",
+    )
+    modes.add_argument("--timestamps", action="store_true")
+    modes.add_argument("--live", action="store_true")
+    parser.add_argument(
+        "--start-time",
+        type=parse_iso_time,
+        help="inclusive Cosmos document _ts lower bound (ISO 8601 with timezone)",
+    )
+    parser.add_argument(
+        "--end-time",
+        type=parse_iso_time,
+        help="inclusive Cosmos document _ts upper bound; defaults to process start",
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=("csv", "jsonl", "both"),
+        default="both",
+        help="assembled interaction output format (default: both)",
+    )
+    args = parser.parse_args(arguments)
+
+    selected_modes = sum(
+        bool(value)
+        for value in (args.chat_id, args.all, args.all_complete, args.timestamps, args.live)
+    )
+    if selected_modes != 1:
+        parser.error(
+            "choose exactly one chat ID, --all, --all-complete, --timestamps, or --live"
+        )
+    if args.start_time is not None and not (args.all or args.all_complete):
+        parser.error("--start-time is supported only with --all or --all-complete")
+    if args.end_time is not None and args.start_time is None:
+        parser.error("--end-time requires --start-time")
+    if args.start_time is not None:
+        args.end_time = args.end_time or datetime.now(timezone.utc)
+        if args.start_time > args.end_time:
+            parser.error("--start-time must be earlier than or equal to --end-time")
+    return args
+
+
+if __name__ == "__main__":
+    args = parse_arguments(sys.argv[1:])
+    if not ENDPOINT:
+        raise ValueError("COSMOS_ENDPOINT is required")
     if BATCH_LIMIT < 0 or BATCH_SIZE < 1 or MAX_WORKERS < 1:
         raise ValueError("BATCH_LIMIT must be >= 0; BATCH_SIZE and MAX_WORKERS must be > 0")
 
@@ -362,7 +442,7 @@ if __name__ == "__main__":
     client = CosmosClient(ENDPOINT, credential=credential)
     database = client.get_database_client(DATABASE)
 
-    if sys.argv[1] == "--live":
+    if args.live:
         from live_stream import run_live_stream
 
         try:
@@ -372,17 +452,26 @@ if __name__ == "__main__":
             credential.close()
         raise SystemExit(0)
 
-    if sys.argv[1] == "--timestamps":
+    if args.timestamps:
         print_container_timestamps(database)
         client.close()
         credential.close()
         raise SystemExit(0)
 
-    all_mode = sys.argv[1] in ("--all", "--all-complete")
-    complete_only = sys.argv[1] == "--all-complete"
+    all_mode = args.all or args.all_complete
+    complete_only = args.all_complete
     if all_mode:
         print_container_timestamps(database)
-    batches = get_chat_id_batches(database) if all_mode else [[sys.argv[1]]]
+    if args.start_time is not None:
+        print(
+            "Filtering chat documents by Cosmos _ts (UTC, inclusive): "
+            f"{args.start_time.isoformat()} through {args.end_time.isoformat()}"
+        )
+    batches = (
+        get_chat_id_batches(database, args.start_time, args.end_time)
+        if all_mode
+        else [[args.chat_id]]
+    )
 
     print(f"Parallel workers: {MAX_WORKERS}")
     success = 0
@@ -411,7 +500,7 @@ if __name__ == "__main__":
 
             # Writes stay on the main thread so concurrent workers never write
             # to the same CSV/JSONL files at the same time.
-            save_interaction(interaction)
+            save_interaction(interaction, args.output_format)
             success += 1
             batch_success += 1
             print(f"Processed {interaction_id}")
