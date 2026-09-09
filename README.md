@@ -42,13 +42,65 @@ python app.py "CHAT-CID"
 
 For a trial dataset run, set `BATCH_LIMIT=10` in `.env` and run `python app.py --all`. Set `BATCH_LIMIT=0` only when ready to process every chat.
 
-To export only chat documents inserted or last updated during a time range, filter
-their Cosmos `_ts` value. Timezone-aware values are converted to UTC, and an
-omitted end time means the time when the process starts:
+## Time-range CSV export
+
+Use this flow to export chat documents inserted or last updated during a specific
+period. The filter uses the Cosmos-managed document `_ts`. Times must include a
+timezone; the application converts them to UTC before querying Cosmos.
+
+Set these values in `.env`, replacing the Cosmos endpoint and any container names
+that differ in your environment:
+
+```env
+COSMOS_ENDPOINT=https://YOUR-ACCOUNT.documents.azure.com:443/
+COSMOS_DATABASE=NORA
+COSMOS_CHAT_CONTAINER=chat-history-uat
+COSMOS_TOOLS_CONTAINER=context-history-all-tools
+COSMOS_CONTEXT_CONTAINER=context-history-uat
+COSMOS_FEEDBACK_CONTAINER=chat-feedback
+
+OUTPUT_DIR=output/timeframe_20260904
+INGESTION_MODE=none
+BATCH_LIMIT=0
+BATCH_SIZE=100
+MAX_WORKERS=10
+```
+
+To export from Friday, September 4, 2026 at 6:00 PM India time through the time
+when the command starts, copy and run:
 
 ```powershell
-python app.py --all --start-time "2026-09-04T18:00:00+05:30" --output-format csv
+.venv\Scripts\Activate.ps1
+az login
+python app.py --all `
+  --start-time "2026-09-04T18:00:00+05:30" `
+  --output-format csv
 ```
+
+Replace `18:00:00` if a different Friday-evening start time is required. Because
+`--end-time` is omitted, the process start time becomes the inclusive end time.
+
+For a fixed end time, copy and run:
+
+```powershell
+.venv\Scripts\Activate.ps1
+az login
+python app.py --all `
+  --start-time "2026-09-04T18:00:00+05:30" `
+  --end-time "2026-09-09T18:00:00+05:30" `
+  --output-format csv
+```
+
+The CSV is written to:
+
+```text
+output/timeframe_20260904/interactions.csv
+```
+
+The start and end bounds are inclusive. Related tool, context, and feedback data
+is joined using each selected chat CID. Output files are append-only, so choose a
+new `OUTPUT_DIR` for every isolated export. With `--output-format csv`, this run
+does not create `interactions.jsonl` in a new output directory.
 
 To export only fully joined interactions, run `python app.py --all-complete`. It writes an interaction only when chat, all-tools context, UAT context, and feedback are all present. Incomplete interactions are skipped.
 
