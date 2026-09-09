@@ -248,4 +248,23 @@ az login
 python intent_app.py
 ```
 
+To classify only records inserted or last updated from Friday evening through the
+time when the command starts, run:
+
+```powershell
+python intent_app.py `
+  --start-time "2026-09-04T18:00:00+05:30"
+```
+
+For a fixed inclusive end time, run:
+
+```powershell
+python intent_app.py `
+  --start-time "2026-09-04T18:00:00+05:30" `
+  --end-time "2026-09-09T18:00:00+05:30"
+```
+
+The range uses the source document's Cosmos-managed `_ts`, and timezone-aware
+values are normalized to UTC. The missing-record audit uses the same range.
+
 Keep `INTENT_WRITE_BACK=false` until the reviewed sample is accurate enough for the intended use.

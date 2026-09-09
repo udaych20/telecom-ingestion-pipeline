@@ -470,6 +470,8 @@ def load_cosmos_records(
     container: Any,
     max_records: int | None,
     workers: int = 1,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Read source records from Cosmos."""
     if workers != 1:
@@ -479,11 +481,40 @@ def load_cosmos_records(
         )
 
     records: list[dict[str, Any]] = []
-    for item in container.read_all_items():
+    for item in iter_cosmos_records(container, start_time, end_time):
         records.append(item)
         if max_records is not None and len(records) >= max_records:
             break
     return records
+
+
+def iter_cosmos_records(
+    container: Any,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+) -> Iterable[dict[str, Any]]:
+    """Read all records or query an inclusive Cosmos `_ts` window."""
+    if start_time is None and end_time is None:
+        return container.read_all_items()
+
+    filters: list[str] = []
+    parameters: list[dict[str, Any]] = []
+    if start_time is not None:
+        filters.append("c._ts >= @start_ts")
+        parameters.append(
+            {"name": "@start_ts", "value": int(start_time.timestamp())}
+        )
+    if end_time is not None:
+        filters.append("c._ts <= @end_ts")
+        parameters.append(
+            {"name": "@end_ts", "value": int(end_time.timestamp())}
+        )
+
+    return container.query_items(
+        query=f"SELECT * FROM c WHERE {' AND '.join(filters)} ORDER BY c._ts DESC",
+        parameters=parameters,
+        enable_cross_partition_query=True,
+    )
 
 
 def cosmos_record_key(record: dict[str, Any]) -> str:
@@ -500,16 +531,21 @@ def cosmos_record_key(record: dict[str, Any]) -> str:
 def find_missing_cosmos_records(
     container: Any,
     exported_records: Iterable[dict[str, Any]],
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Run a fresh container query and return records absent from the first read."""
+    """Repeat the same Cosmos scope and return records absent from the first read."""
     exported_keys = {cosmos_record_key(record) for record in exported_records}
     missing: list[dict[str, Any]] = []
     inventory_count = 0
 
-    items = container.query_items(
-        query="SELECT * FROM c",
-        enable_cross_partition_query=True,
-    )
+    if start_time is None and end_time is None:
+        items = container.query_items(
+            query="SELECT * FROM c",
+            enable_cross_partition_query=True,
+        )
+    else:
+        items = iter_cosmos_records(container, start_time, end_time)
     for item in items:
         inventory_count += 1
         if cosmos_record_key(item) not in exported_keys:
@@ -600,7 +636,24 @@ def required_env(name: str) -> str:
     return value
 
 
-def parse_args() -> argparse.Namespace:
+def parse_iso_time(value: str) -> datetime:
+    normalized = value.strip()
+    if normalized.endswith(("Z", "z")):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "must be an ISO 8601 time, for example 2026-09-04T18:00:00+05:30"
+        ) from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise argparse.ArgumentTypeError(
+            "must include a timezone offset, for example +05:30 or Z"
+        )
+    return parsed.astimezone(timezone.utc)
+
+
+def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Label NORA context-history records with conversation intents."
     )
@@ -609,7 +662,24 @@ def parse_args() -> argparse.Namespace:
         default=str(Path(__file__).with_name("intent_app_config.env")),
         help="Path to the .env configuration file",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--start-time",
+        type=parse_iso_time,
+        help="inclusive Cosmos document _ts lower bound (ISO 8601 with timezone)",
+    )
+    parser.add_argument(
+        "--end-time",
+        type=parse_iso_time,
+        help="inclusive Cosmos document _ts upper bound; defaults to process start",
+    )
+    args = parser.parse_args(arguments)
+    if args.end_time is not None and args.start_time is None:
+        parser.error("--end-time requires --start-time")
+    if args.start_time is not None:
+        args.end_time = args.end_time or datetime.now(timezone.utc)
+        if args.start_time > args.end_time:
+            parser.error("--start-time must be earlier than or equal to --end-time")
+    return args
 
 
 def main() -> None:
@@ -637,7 +707,18 @@ def main() -> None:
     database = client.get_database_client(database_name)
     source_container = database.get_container_client(container_name)
 
-    records = load_cosmos_records(source_container, max_records, workers)
+    if args.start_time is not None:
+        print(
+            "Filtering Cosmos documents by _ts (UTC, inclusive): "
+            f"{args.start_time.isoformat()} through {args.end_time.isoformat()}"
+        )
+    records = load_cosmos_records(
+        source_container,
+        max_records,
+        workers,
+        args.start_time,
+        args.end_time,
+    )
     labels = label_records(records, include_source_fields=include_source_fields)
     if output_path.suffix.lower() == ".csv":
         write_csv(output_path, labels)
@@ -656,6 +737,8 @@ def main() -> None:
         missing_records, inventory_count = find_missing_cosmos_records(
             source_container,
             records,
+            args.start_time,
+            args.end_time,
         )
         combined_labels = label_records(
             [*records, *missing_records],

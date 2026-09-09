@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add timezone-aware Cosmos `_ts` filtering to the intent-classification export
+  and its missing-record audit.
+
 - Added Cosmos interaction reconstruction using `DefaultAzureCredential`.
 - Added complete CSV and JSONL interaction logs.
 - Added configurable LLM and knowledge-graph preparation outputs.

@@ -1,4 +1,6 @@
+import argparse
 import unittest
+from datetime import datetime, timezone
 
 from intent_app import (
     classify,
@@ -8,6 +10,7 @@ from intent_app import (
     find_missing_cosmos_records,
     label_records,
     load_cosmos_records,
+    parse_iso_time,
 )
 
 
@@ -67,6 +70,71 @@ class IntentExtractionTests(unittest.TestCase):
 
         self.assertEqual(inventory_count, 2)
         self.assertEqual(missing, [{"id": "two", "_rid": "rid-two"}])
+
+    def test_timeframe_query_uses_inclusive_epoch_bounds(self):
+        class Container:
+            def query_items(self, **kwargs):
+                self.arguments = kwargs
+                return [{"id": "one", "_ts": 1788525000}]
+
+        container = Container()
+        start = datetime(2026, 9, 4, 12, 30, tzinfo=timezone.utc)
+        end = datetime(2026, 9, 9, 12, 30, tzinfo=timezone.utc)
+
+        records = load_cosmos_records(
+            container,
+            max_records=None,
+            start_time=start,
+            end_time=end,
+        )
+
+        self.assertEqual(records, [{"id": "one", "_ts": 1788525000}])
+        self.assertIn("c._ts >= @start_ts", container.arguments["query"])
+        self.assertIn("c._ts <= @end_ts", container.arguments["query"])
+        self.assertEqual(
+            container.arguments["parameters"],
+            [
+                {"name": "@start_ts", "value": 1788525000},
+                {"name": "@end_ts", "value": 1788957000},
+            ],
+        )
+
+    def test_missing_record_audit_uses_the_same_timeframe(self):
+        class Container:
+            def query_items(self, **kwargs):
+                self.arguments = kwargs
+                return [{"id": "two", "_rid": "rid-two"}]
+
+        container = Container()
+        start = datetime(2026, 9, 4, 12, 30, tzinfo=timezone.utc)
+        end = datetime(2026, 9, 9, 12, 30, tzinfo=timezone.utc)
+
+        missing, inventory_count = find_missing_cosmos_records(
+            container,
+            [],
+            start,
+            end,
+        )
+
+        self.assertEqual(inventory_count, 1)
+        self.assertEqual(missing, [{"id": "two", "_rid": "rid-two"}])
+        self.assertEqual(
+            container.arguments["parameters"],
+            [
+                {"name": "@start_ts", "value": 1788525000},
+                {"name": "@end_ts", "value": 1788957000},
+            ],
+        )
+
+    def test_parse_iso_time_requires_timezone_and_normalizes_to_utc(self):
+        parsed = parse_iso_time("2026-09-04T18:00:00+05:30")
+
+        self.assertEqual(
+            parsed,
+            datetime(2026, 9, 4, 12, 30, tzinfo=timezone.utc),
+        )
+        with self.assertRaises(argparse.ArgumentTypeError):
+            parse_iso_time("2026-09-04T18:00:00")
 
     def test_extracts_nested_user_message_and_cid(self):
         record = screenshot_style_record("router is showing no internet connection")

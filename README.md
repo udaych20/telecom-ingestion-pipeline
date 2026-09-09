@@ -44,6 +44,31 @@ To export only fully joined interactions, run `python app.py --all-complete`. It
 
 The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
+## Intent classification timeframe export
+
+Configure the Cosmos source and output in `intent_app_config.env`, then classify
+only documents inserted or last updated from Friday evening through the time the
+command starts:
+
+```powershell
+az login
+python intent_app.py `
+  --start-time "2026-09-04T18:00:00+05:30"
+```
+
+For a fixed inclusive end time:
+
+```powershell
+python intent_app.py `
+  --start-time "2026-09-04T18:00:00+05:30" `
+  --end-time "2026-09-09T18:00:00+05:30"
+```
+
+Both values must include a timezone. They are converted to UTC before the
+parameterized Cosmos `_ts` query runs. When `--end-time` is omitted, the process
+start time is used. The output path and CSV/JSONL format continue to come from
+`INTENT_OUTPUT` in `intent_app_config.env`.
+
 ## Current limitation
 
 The supplied feedback example does not show a `cid`. The current join assumes feedback documents contain `cid`; confirm the real feedback correlation field before production use.
