@@ -4,9 +4,12 @@
 
 ```text
 app.py               Application and exporters
+live_stream.py       Event Hubs and Kafka subscribers
+azure_function/      Cosmos change-feed publisher
 requirements.txt     Python dependencies
 .env.example         Safe configuration template
 docs/                Specifications and operating documentation
+tests/               Unit tests
 output/              Generated files; ignored by Git
 ```
 

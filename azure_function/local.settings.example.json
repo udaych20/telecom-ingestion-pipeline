@@ -1,0 +1,26 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "COSMOS_CONNECTION__accountEndpoint": "https://YOUR-ACCOUNT.documents.azure.com:443/",
+    "COSMOS_DATABASE": "NORA",
+    "COSMOS_CHAT_CONTAINER": "chat-history-uat",
+    "COSMOS_TOOLS_CONTAINER": "context-history-all-tools",
+    "COSMOS_CONTEXT_CONTAINER": "context-history-uat",
+    "COSMOS_FEEDBACK_CONTAINER": "chat-feedback",
+    "COSMOS_CHAT_LEASE_CONTAINER": "leases-chat",
+    "COSMOS_TOOLS_LEASE_CONTAINER": "leases-tools",
+    "COSMOS_CONTEXT_LEASE_CONTAINER": "leases-context",
+    "COSMOS_FEEDBACK_LEASE_CONTAINER": "leases-feedback",
+    "LIVE_STREAM_PROVIDER": "event_hubs",
+    "LIVE_STREAM_EVENT_HUB_NAMESPACE": "YOUR-NAMESPACE.servicebus.windows.net",
+    "LIVE_STREAM_EVENT_HUB_NAME": "cosmos-changes",
+    "LIVE_STREAM_KAFKA_BOOTSTRAP_SERVERS": "YOUR-KAFKA-BROKERS:9092",
+    "LIVE_STREAM_KAFKA_TOPIC": "cosmos-changes",
+    "LIVE_STREAM_KAFKA_SECURITY_PROTOCOL": "SASL_SSL",
+    "LIVE_STREAM_KAFKA_SASL_MECHANISM": "PLAIN",
+    "LIVE_STREAM_KAFKA_USERNAME": "SET-AS-A-SECRET",
+    "LIVE_STREAM_KAFKA_PASSWORD": "SET-AS-A-SECRET"
+  }
+}

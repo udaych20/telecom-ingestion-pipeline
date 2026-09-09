@@ -26,6 +26,12 @@ python -m py_compile app.py
 - Batch boundaries for fewer than, exactly, and more than `BATCH_SIZE` IDs.
 - Complete-only mode exports all four sources and skips every incomplete combination.
 - Batch processing continues after one interaction fails.
+- Live mode is rejected while `LIVE_STREAM_DATA_ENABLED=false`.
+- Live events with direct CIDs and run-ID-only correlation are resolved.
+- Invalid event envelopes are rejected before a checkpoint or offset commit.
+- Event Hubs checkpoints occur only after processing succeeds.
+- Kafka auto-commit is disabled and offsets commit only after processing succeeds.
+- Replayed stable event IDs do not append outputs again.
 
 ### Integration cases
 

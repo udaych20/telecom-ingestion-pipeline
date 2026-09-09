@@ -11,6 +11,7 @@ A small Python pipeline that reconstructs a complete NORA user interaction from 
 5. Reads feedback where the chat CID appears in `feedbacks[].cid_list`.
 6. Writes a readable interaction CSV and a complete JSONL audit log.
 7. Optionally writes either LLM-training JSONL or graph node/edge CSV files.
+8. Optionally consumes live Cosmos change notifications from Azure Event Hubs or Kafka.
 
 Authentication uses `DefaultAzureCredential`; Cosmos account keys are not stored.
 
@@ -28,6 +29,7 @@ Authentication uses `DefaultAzureCredential`; Cosmos account keys are not stored
 - [Operations and troubleshooting](docs/OPERATIONS.md)
 - [Security and privacy](docs/SECURITY.md)
 - [Development process](docs/DEVELOPMENT.md)
+- [Live streaming design and operations](docs/LIVE_STREAMING.md)
 
 ## Minimal run
 
@@ -43,6 +45,20 @@ For a trial dataset run, set `BATCH_LIMIT=10` in `.env` and run `python app.py -
 To export only fully joined interactions, run `python app.py --all-complete`. It writes an interaction only when chat, all-tools context, UAT context, and feedback are all present. Incomplete interactions are skipped.
 
 The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
+
+## Live data
+
+Historical single-ID and batch runs remain the default. To start a configured
+live subscriber, set `LIVE_STREAM_DATA_ENABLED=true`, choose
+`LIVE_STREAM_PROVIDER=event_hubs` or `kafka`, and run:
+
+```powershell
+python app.py --live
+```
+
+Live mode expects Cosmos change notifications produced by the Azure Function in
+`azure_function/`. See [Live streaming](docs/LIVE_STREAMING.md) for the two
+architectures, provisioning, delivery guarantees, and security requirements.
 
 ## Current limitation
 

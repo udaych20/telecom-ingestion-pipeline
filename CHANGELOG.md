@@ -14,3 +14,6 @@
 - Corrected context correlation to use all-tools `cid` as the bridge to UAT `run_id`.
 - Corrected correlation so context `run_id` references chat `cid` and feedback matches chat `cid`.
 - Added the spec-driven documentation set.
+- Added Cosmos change-feed publication through Azure Functions.
+- Added durable live subscribers for Azure Event Hubs and Apache Kafka.
+- Added replay suppression, retry handling, and live-stream operating guidance.

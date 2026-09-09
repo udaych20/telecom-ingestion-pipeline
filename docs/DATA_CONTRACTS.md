@@ -62,6 +62,17 @@ The CSVs are neutral interchange files; target-specific import headers or comman
 
 `failed_interactions.csv` contains `interaction_id` and `error`. It is append-only and may contain repeated failures across reruns.
 
+## Live change notification
+
+Live notifications follow a CloudEvents-style envelope with `specversion`, `id`,
+`source`, `type`, `subject`, `time`, `datacontenttype`, and `data`. The `data`
+object contains the database, container, document ID, ETag, CIDs, nested CID-list
+values, and run IDs. It does not contain the source Cosmos document.
+
+Live interactions written to `interactions.jsonl` include a `live_event` object
+with the notification ID and source metadata. Unmatched notifications are written
+to `unmatched_live_events.csv`.
+
 ## Complete-interaction rule
 
 For `--all-complete`, `chat_history`, `tool_history`, `context_history`, and `feedback` must each contain at least one record. The rule checks presence, not semantic quality or record counts.

@@ -20,6 +20,12 @@
 
 `DefaultAzureCredential` chooses the available identity source. Locally this is normally Azure CLI; in Azure it should be managed identity or workload identity.
 
+`azure_function/function_app.py` owns the Cosmos change-feed triggers and publishes
+small, stable-ID notifications. `live_stream.py` owns provider configuration,
+Event Hubs checkpointing, Kafka offset commits, retries, and replay suppression.
+`app.py` remains responsible for correlation and export in both historical and
+live modes. See `LIVE_STREAMING.md` for both deployment flows.
+
 ## Query design
 
 The pipeline performs cross-partition parameterized queries because partition keys were not provided. Chat CIDs are enumerated from `messages[].data.cid` and matched to `context-history-all-tools.cid`. Run IDs from those records query `context-history-uat.run_id`. Feedback uses an `EXISTS` subquery with `ARRAY_CONTAINS` against `feedbacks[].cid_list`. Dataset mode reuses one Cosmos client and streams IDs in bounded in-memory batches, but still performs queries per interaction. This is suitable for validation; high-volume production ingestion should use known partition keys, bulk concurrency, or the Cosmos change feed.
@@ -40,8 +46,6 @@ Files are append-only, so rerunning an ID or dataset creates duplicate rows. Thi
 
 ## Future design options
 
-- Use the Cosmos change feed for continuous ingestion.
-- Add checkpointing and retry policy for bulk workloads.
 - Add schema validation before export.
 - Add a redaction layer before LLM output.
 - Add direct adapters only after choosing the target platform.

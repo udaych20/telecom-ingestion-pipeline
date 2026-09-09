@@ -39,3 +39,10 @@ python app.py "KNOWN-CHAT-CID"
 Verify that output files are created and that their correlation IDs match the source records.
 
 For dataset validation, set `BATCH_LIMIT` to a small positive value and run `python app.py --all`. Review `failed_interactions.csv`, then use `BATCH_LIMIT=0` for the complete dataset.
+
+## Live setup
+
+The live path also requires the Azure Function project under `azure_function/`,
+four pre-created Cosmos lease containers, and either Event Hubs plus Blob
+checkpoint storage or a Kafka topic. Follow `LIVE_STREAMING.md` before setting
+`LIVE_STREAM_DATA_ENABLED=true`.

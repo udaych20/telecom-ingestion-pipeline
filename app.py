@@ -173,9 +173,9 @@ def get_interaction(database, cid):
     if not chats:
         raise ValueError(f"Chat not found for cid: {cid}")
 
-    context_history = query(context, "run_id", [cid])
-    run_ids = find_values(context_history, "run_id")
-    tool_history = query(tools, "run_id", run_ids) if run_ids else []
+    tool_history = query(tools, "cid", [cid])
+    run_ids = find_values(tool_history, "run_id")
+    context_history = query(context, "run_id", run_ids) if run_ids else []
 
     feedback = query_feedback(feedback_container, [cid])
 
@@ -189,6 +189,68 @@ def get_interaction(database, cid):
         "context_history": remove_duplicates(context_history),
         "feedback": feedback,
     }
+
+
+def live_event_values(data, field):
+    value = data.get(field, [])
+    if value is None:
+        return []
+    values = value if isinstance(value, list) else [value]
+    return [
+        str(item) for item in values if item is not None and str(item).strip()
+    ]
+
+
+def resolve_live_event_cids(database, event):
+    data = event["data"]
+    cids = live_event_values(data, "cids")
+    cids.extend(live_event_values(data, "cid_lists"))
+    if cids:
+        return list(dict.fromkeys(cids))
+
+    run_ids = live_event_values(data, "run_ids")
+    if not run_ids:
+        return []
+    tools = database.get_container_client(TOOLS_CONTAINER)
+    tool_records = query(tools, "run_id", run_ids)
+    return find_values(tool_records, "cid")
+
+
+def log_unmatched_live_event(event):
+    data = event["data"]
+    path = os.path.join(OUTPUT_DIR, "unmatched_live_events.csv")
+    append_csv(
+        path,
+        ["event_id", "source", "container", "document_id", "reason"],
+        [(
+            event.get("id", ""),
+            event.get("source", ""),
+            data.get("container", ""),
+            data.get("document_id", ""),
+            "No cid could be resolved from the change notification",
+        )],
+    )
+
+
+def process_live_event(database, event):
+    cids = resolve_live_event_cids(database, event)
+    if not cids:
+        log_unmatched_live_event(event)
+        print(f"Skipped uncorrelated live event {event['id']}")
+        return
+
+    for cid in cids:
+        interaction = get_interaction(database, cid)
+        interaction["live_event"] = {
+            "id": event["id"],
+            "source": event.get("source", ""),
+            "type": event.get("type", ""),
+            "time": event.get("time", ""),
+            "container": event["data"].get("container", ""),
+            "document_id": event["data"].get("document_id", ""),
+        }
+        save_interaction(interaction)
+        print(f"Processed live interaction {cid} from event {event['id']}")
 
 
 def save_interaction(interaction):
@@ -286,7 +348,10 @@ def process_batch(database, interaction_ids):
 
 if __name__ == "__main__":
     if not ENDPOINT or len(sys.argv) != 2:
-        print("Usage: python app.py <chat-id> | --all | --all-complete | --timestamps")
+        print(
+            "Usage: python app.py <chat-id> | --all | --all-complete | "
+            "--timestamps | --live"
+        )
         print("Set COSMOS_ENDPOINT and optionally COSMOS_DATABASE first.")
         raise SystemExit(1)
     if BATCH_LIMIT < 0 or BATCH_SIZE < 1 or MAX_WORKERS < 1:
@@ -296,6 +361,16 @@ if __name__ == "__main__":
     credential = DefaultAzureCredential()
     client = CosmosClient(ENDPOINT, credential=credential)
     database = client.get_database_client(DATABASE)
+
+    if sys.argv[1] == "--live":
+        from live_stream import run_live_stream
+
+        try:
+            run_live_stream(lambda event: process_live_event(database, event), credential)
+        finally:
+            client.close()
+            credential.close()
+        raise SystemExit(0)
 
     if sys.argv[1] == "--timestamps":
         print_container_timestamps(database)

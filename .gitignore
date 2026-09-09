@@ -3,4 +3,5 @@ __pycache__/
 *.py[cod]
 .env
 output/
+azure_function/local.settings.json
 

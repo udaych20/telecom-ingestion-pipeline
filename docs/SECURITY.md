@@ -14,6 +14,13 @@ Grant the Cosmos DB Built-in Data Reader role at the narrowest account, database
 - Do not use Cosmos account keys in this application.
 - Do not print credentials or tokens.
 - Store any future destination credentials in an approved secret manager.
+- Grant the change-feed Function read access to the monitored containers, write
+  access only to its lease containers, and sender access only to the selected
+  broker.
+- Grant the subscriber receiver access to Event Hubs and data access to its
+  dedicated Blob checkpoint container. Do not grant broker-management roles.
+- Inject Kafka SASL credentials from Key Vault or the hosting platform's secret
+  store; never place production credentials in `.env` or local settings files.
 
 ## Personal data
 
@@ -26,6 +33,11 @@ The examples include names, email addresses, device identifiers, telephone numbe
 5. Keep a traceable dataset version and approval record.
 
 Dataset mode can export every accessible chat record. Use the narrowest Cosmos role scope, a controlled output directory, and a positive `BATCH_LIMIT` during validation to reduce accidental exposure.
+
+Live notifications deliberately exclude source documents and message content.
+They still contain record and correlation identifiers, so broker access, network
+paths, retention, and diagnostic logs must follow the same data-classification
+policy as the source system.
 
 ## Reporting
 

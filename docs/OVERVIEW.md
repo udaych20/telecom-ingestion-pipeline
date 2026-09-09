@@ -6,7 +6,7 @@ The pipeline gathers records belonging to one customer interaction from multiple
 
 ## Inputs and outputs
 
-Input: one message CID, `--all` for every distinct `chat_history.messages[].data.cid`, or `--all-complete` for only four-source interactions. Dataset CIDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
+Input: one message CID, `--all` for every distinct `chat_history.messages[].data.cid`, `--all-complete` for only four-source interactions, or `--live` for brokered Cosmos change notifications. Dataset CIDs are streamed in configured batches, and `BATCH_LIMIT` can restrict a trial.
 
 Outputs:
 
@@ -18,6 +18,8 @@ Outputs:
 | `graph_nodes.csv` | `INGESTION_MODE=knowledge_graph` | Graph nodes |
 | `graph_edges.csv` | `INGESTION_MODE=knowledge_graph` | Graph relationships |
 | `failed_interactions.csv` | When an ID fails | Interaction ID and error message |
+| `unmatched_live_events.csv` | When a live event cannot be correlated | Event and source identifiers |
+| `live_stream_state.db` | Live mode | Processed event IDs used for replay suppression |
 
 ## Container relationship
 
@@ -35,4 +37,7 @@ The message CID is matched to `context-history-all-tools.cid` and nested feedbac
 
 ## Scope
 
-The current version is a command-line reader supporting single-interaction, complete-dataset, and complete-join-only runs. Dataset mode still performs correlation queries per interaction. Scheduling, change-feed processing, direct model fine-tuning, and direct graph-database writes are outside the current scope.
+The command-line reader supports single-interaction, complete-dataset,
+complete-join-only, and live runs. Dataset and live modes still perform Cosmos
+correlation queries per interaction. Scheduling, direct model fine-tuning, and
+direct graph-database writes are outside the current scope.

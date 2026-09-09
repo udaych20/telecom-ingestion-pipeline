@@ -22,6 +22,11 @@ Use `python app.py --all-complete` when downstream data must contain all four so
 | Entries in failure CSV | Per-interaction query or export error | Review the error, correct the cause, and rerun the affected ID |
 | Batch stops before processing IDs | Connection or chat-ID enumeration failed | Check credentials, endpoint, role, and network access |
 | HTTP 429 | Cosmos throttling | Retry later; add SDK retry/batch controls for scale |
+| `--live` refuses to start | `LIVE_STREAM_DATA_ENABLED` is false | Set it to `true` after configuring a provider |
+| Event Hubs partition blocked | One event exhausted processing retries | Correct the failure and restart from the Blob checkpoint |
+| Kafka subscriber exits | Broker or processing failure before offset commit | Correct the failure and let the supervisor restart it |
+| Live event is unmatched | Notification had no resolvable CID | Review `unmatched_live_events.csv` and correlation fields |
+| Duplicate live output | Process stopped between output append and ledger update | Deduplicate by `live_event.id`; use an idempotent shared sink for multiple replicas |
 
 ## Output retention
 
@@ -37,3 +42,6 @@ Outputs can contain customer information. Store them only in an approved locatio
 - Monitoring and run-level audit identifiers added.
 - Retry, checkpointing, and idempotency designed for batch volume.
 - Trial batch completed before an unrestricted `BATCH_LIMIT=0` run.
+- Dedicated change-feed leases, consumer group, and checkpoint storage provisioned.
+- Broker retention and lag alerts configured for the maximum expected outage.
+- Live subscriber runs under a supervisor with restart and health monitoring.

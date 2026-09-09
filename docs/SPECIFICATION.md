@@ -2,7 +2,7 @@
 
 Status: implemented baseline  
 Owner: project team  
-Last updated: 2026-08-26
+Last updated: 2026-09-09
 
 ## Problem
 
@@ -43,6 +43,12 @@ Interaction data is split across chat, tool-context, detailed-context, and feedb
 | FR-11 | Limit a trial batch | A positive `BATCH_LIMIT` processes at most that many enumerated chat CIDs |
 | FR-12 | Export complete joins only | `--all-complete` exports only interactions with records from all four sources |
 | FR-13 | Process in batches | Dataset IDs are handled in groups of `BATCH_SIZE` rather than loaded together |
+| FR-14 | Gate live processing | `LIVE_STREAM_DATA_ENABLED=true` is required for `python app.py --live` |
+| FR-15 | Publish Cosmos changes | Azure Functions observe creates and updates in all four source containers |
+| FR-16 | Support Event Hubs | A subscriber uses a consumer group and durable Blob checkpoints |
+| FR-17 | Support Kafka | A subscriber uses manual offset commits after successful processing |
+| FR-18 | Suppress successful replays | Stable event IDs are recorded in a durable local ledger |
+| FR-19 | Avoid brokered customer content | Change notifications contain identifiers and correlation metadata, not source documents |
 
 ## Non-functional requirements
 

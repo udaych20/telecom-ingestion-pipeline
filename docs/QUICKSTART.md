@@ -45,3 +45,13 @@ python app.py --all-complete
 ```
 
 Incomplete interactions are skipped and are not written to output or the failure CSV.
+
+## Test live mode
+
+Provision the publisher and broker resources described in
+[Live streaming](LIVE_STREAMING.md). Set `LIVE_STREAM_DATA_ENABLED=true` and the
+provider-specific variables in `.env`, then run:
+
+```powershell
+python app.py --live
+```

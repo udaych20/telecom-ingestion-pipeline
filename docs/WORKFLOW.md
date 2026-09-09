@@ -46,3 +46,14 @@ No schema assumption should move into production code until it is documented and
 `python app.py --all` enumerates distinct chat CIDs and applies the normal workflow using one Cosmos connection. CIDs are streamed in groups of `BATCH_SIZE`. `BATCH_LIMIT=0` means every enumerated CID; a positive value restricts a trial run. Failed interactions are appended to `failed_interactions.csv`, and processing continues.
 
 `python app.py --all-complete` uses the same batches but exports only interactions containing chat history, all-tools context, UAT context, and feedback. Missing any source causes a skip, not a failure. The final console line reports succeeded, skipped, and failed counts.
+
+## Live workflow
+
+```text
+Cosmos create/update -> Function change-feed trigger -> Event Hubs or Kafka
+    -> app.py --live -> resolve CID -> assemble interaction -> existing outputs
+```
+
+`LIVE_STREAM_DATA_ENABLED=true` is required for `--live`. Broker checkpoints or
+offsets advance only after processing succeeds. See `LIVE_STREAMING.md` for the
+provider-specific flows and operational behavior.

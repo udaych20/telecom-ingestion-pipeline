@@ -14,5 +14,6 @@
 | [Operations](OPERATIONS.md) | Operators | Troubleshooting and readiness |
 | [Security](SECURITY.md) | Security and data owners | Identity, secrets, and personal data |
 | [Development](DEVELOPMENT.md) | Contributors | Spec-driven change process |
+| [Live streaming](LIVE_STREAMING.md) | Engineering and operations | Event Hubs and Kafka architectures |
 
 The product specification is authoritative for intended behavior. The data-contract document is authoritative for correlation and export schemas. When they conflict with implementation, treat that as a defect and resolve both in the same change.
