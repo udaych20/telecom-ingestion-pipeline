@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add an automatic CSV report with classified-record and unique-CID counts by
+  intent.
+- Add a standalone CSV comparison report for old and recent intent exports,
+  including support for `test.py`'s flattened CID column.
+
 - Add timezone-aware Cosmos `_ts` filtering to the intent-classification export
   and its missing-record audit.
 

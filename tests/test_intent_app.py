@@ -3,6 +3,7 @@ import unittest
 from datetime import datetime, timezone
 
 from intent_app import (
+    build_intent_count_rows,
     classify,
     conversation_id,
     extract_issue,
@@ -135,6 +136,37 @@ class IntentExtractionTests(unittest.TestCase):
         )
         with self.assertRaises(argparse.ArgumentTypeError):
             parse_iso_time("2026-09-04T18:00:00")
+
+    def test_builds_record_and_unique_cid_counts_by_intent(self):
+        rows = build_intent_count_rows(
+            [
+                {"conversation_id": "c1", "classification.intent": "rca"},
+                {"conversation_id": "c1", "classification.intent": "rca"},
+                {"conversation_id": "c1", "classification.intent": "query"},
+                {"conversation_id": "c2", "classification.intent": "query"},
+            ]
+        )
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "classification_intent": "query",
+                    "classified_record_count": 2,
+                    "unique_cid_count": 2,
+                },
+                {
+                    "classification_intent": "rca",
+                    "classified_record_count": 2,
+                    "unique_cid_count": 1,
+                },
+                {
+                    "classification_intent": "ALL_INTENTS",
+                    "classified_record_count": 4,
+                    "unique_cid_count": 2,
+                },
+            ],
+        )
 
     def test_extracts_nested_user_message_and_cid(self):
         record = screenshot_style_record("router is showing no internet connection")

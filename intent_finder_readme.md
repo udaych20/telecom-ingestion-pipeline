@@ -184,6 +184,22 @@ The most useful review columns are:
 
 The confidence values are fixed values assigned to rules. They are not probabilities learned from historical data.
 
+Each run also writes `INTENT_COUNT_OUTPUT`. This compact CSV reports
+`classified_record_count` and `unique_cid_count` for every intent. Its final
+`ALL_INTENTS` row contains the overall record count and the distinct CID count
+across the complete run. The report uses exactly the same timeframe and record
+limit as the main classification output.
+
+For two existing CSV exports, create one comparison report without rerunning
+Cosmos or changing `test.py`:
+
+```powershell
+python intent_count_report.py `
+  --dataset "old_data=C:\path\old_intent_labels.csv" `
+  --dataset "friday_to_yesterday=C:\path\friday_to_yesterday_labels.csv" `
+  --output "intent_cid_count_report.csv"
+```
+
 The original nested `source.user_inputs` column is omitted. Its values appear as separate columns such as:
 
 ```text

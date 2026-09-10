@@ -67,7 +67,25 @@ python intent_app.py `
 Both values must include a timezone. They are converted to UTC before the
 parameterized Cosmos `_ts` query runs. When `--end-time` is omitted, the process
 start time is used. The output path and CSV/JSONL format continue to come from
-`INTENT_OUTPUT` in `intent_app_config.env`.
+`INTENT_OUTPUT` in `intent_app_config.env`. Every run also creates the CSV named
+by `INTENT_COUNT_OUTPUT`, containing classified-record and distinct-CID counts for
+each intent plus an `ALL_INTENTS` total row.
+
+## Compare old and recent intent CSVs
+
+`intent_count_report.py` compares any number of classification CSV exports. It
+accepts both the original `intent_app.py` columns and `test.py`'s flattened
+`message.data.cid` column, so `test.py` does not need to change.
+
+```powershell
+python intent_count_report.py `
+  --dataset "old_data=C:\path\old_intent_labels.csv" `
+  --dataset "friday_to_yesterday=C:\path\friday_to_yesterday_labels.csv" `
+  --output "intent_cid_count_report.csv"
+```
+
+The report contains input-row count, distinct CID count, and rows without a CID
+for every intent and an `ALL_INTENTS` row for each named dataset.
 
 ## Current limitation
 

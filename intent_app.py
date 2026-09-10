@@ -570,6 +570,62 @@ def write_csv(path: Path, labels: list[dict[str, Any]]) -> None:
         writer.writerows(labels)
 
 
+def build_intent_count_rows(
+    labels: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build deterministic record and distinct-CID counts for every intent."""
+    record_counts: Counter[str] = Counter()
+    intent_cids: dict[str, set[str]] = defaultdict(set)
+    all_cids: set[str] = set()
+
+    for label in labels:
+        intent = str(label.get("classification.intent", "")).strip()
+        if not intent:
+            continue
+        record_counts[intent] += 1
+
+        cid = str(label.get("conversation_id", "")).strip()
+        if cid:
+            intent_cids[intent].add(cid)
+            all_cids.add(cid)
+
+    rows = [
+        {
+            "classification_intent": intent,
+            "classified_record_count": record_counts[intent],
+            "unique_cid_count": len(intent_cids[intent]),
+        }
+        for intent in sorted(record_counts)
+    ]
+    rows.append(
+        {
+            "classification_intent": "ALL_INTENTS",
+            "classified_record_count": sum(record_counts.values()),
+            "unique_cid_count": len(all_cids),
+        }
+    )
+    return rows
+
+
+def write_intent_count_csv(
+    path: Path,
+    labels: Iterable[dict[str, Any]],
+) -> None:
+    rows = build_intent_count_rows(labels)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=(
+                "classification_intent",
+                "classified_record_count",
+                "unique_cid_count",
+            ),
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def write_labels_to_container(target_container: Any, labels: Iterable[dict[str, Any]]) -> None:
     for label in labels:
         source_id = label.get("source_id")
@@ -690,6 +746,17 @@ def main() -> None:
     database_name = required_env("COSMOS_DATABASE")
     container_name = required_env("COSMOS_CONTAINER")
     output_path = Path(os.environ.get("INTENT_OUTPUT", "intent_labels_all.csv"))
+    default_count_path = output_path.with_name(f"{output_path.stem}_counts.csv")
+    configured_count_path = os.environ.get("INTENT_COUNT_OUTPUT", "").strip()
+    count_output_path = (
+        Path(configured_count_path)
+        if configured_count_path
+        else default_count_path
+    )
+    if count_output_path.suffix.lower() != ".csv":
+        raise ValueError("INTENT_COUNT_OUTPUT must end in .csv")
+    if count_output_path.resolve() == output_path.resolve():
+        raise ValueError("INTENT_COUNT_OUTPUT must differ from INTENT_OUTPUT")
     max_records = env_int("INTENT_MAX_RECORDS")
     workers = env_int("INTENT_MAX_WORKERS") or 1
     find_missing = env_bool("INTENT_FIND_MISSING", False)
@@ -726,6 +793,7 @@ def main() -> None:
         write_jsonl(output_path, labels)
     else:
         raise ValueError("--output must end in .csv, .jsonl, or .ndjson")
+    write_intent_count_csv(count_output_path, labels)
 
     missing_records: list[dict[str, Any]] = []
     inventory_count: int | None = None
@@ -783,6 +851,7 @@ def main() -> None:
         print(f"  {intent}: {count:,}")
     print(f"Human review recommended: {review_count:,}")
     print(f"Local output: {output_path.resolve()}")
+    print(f"Intent count output: {count_output_path.resolve()}")
     if find_missing:
         print(f"Fresh Cosmos inventory: {inventory_count:,}")
         print(f"Records missing from first read: {len(missing_records):,}")

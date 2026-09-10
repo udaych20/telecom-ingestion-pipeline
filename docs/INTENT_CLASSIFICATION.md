@@ -42,3 +42,32 @@ python intent_app.py `
 ```
 
 The missing-record audit, when enabled, is constrained to the same timeframe.
+
+## Unique CID counts by intent
+
+Every run creates a second CSV report controlled by `INTENT_COUNT_OUTPUT`. The
+default name is the main output stem followed by `_counts.csv`. It contains:
+
+| Column | Meaning |
+|---|---|
+| `classification_intent` | Generated classification intent or `ALL_INTENTS` |
+| `classified_record_count` | Number of classified Cosmos source records |
+| `unique_cid_count` | Number of distinct non-empty conversation IDs |
+
+The `ALL_INTENTS` row counts each CID once across the entire run. Within the
+intent rows, a CID is counted once per intent, so a CID classified under different
+intents contributes once to each of those rows. The report follows the same
+timeframe and `INTENT_MAX_RECORDS` scope as the main classification output.
+
+To compare separately generated old-data and Friday-to-yesterday CSVs, run:
+
+```powershell
+python intent_count_report.py `
+  --dataset "old_data=C:\path\old_intent_labels.csv" `
+  --dataset "friday_to_yesterday=C:\path\friday_to_yesterday_labels.csv" `
+  --output "intent_cid_count_report.csv"
+```
+
+The comparison app recognizes `conversation_id`, direct `cid`, nested
+`source.messages`, and `test.py`'s flattened `message.data.cid`. It does not
+modify either input CSV.
