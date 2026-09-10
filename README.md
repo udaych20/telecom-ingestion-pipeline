@@ -77,15 +77,25 @@ each intent plus an `ALL_INTENTS` total row.
 accepts both the original `intent_app.py` columns and `test.py`'s flattened
 `message.data.cid` column, so `test.py` does not need to change.
 
+Place these two input files in the repository root:
+
+```text
+intent_labels_old.csv
+intent_labels_friday_to_yesterday.csv
+```
+
+Then copy and run this command from the repository root in PowerShell:
+
 ```powershell
 python intent_count_report.py `
-  --dataset "old_data=C:\path\old_intent_labels.csv" `
-  --dataset "friday_to_yesterday=C:\path\friday_to_yesterday_labels.csv" `
+  --dataset "old_data=intent_labels_old.csv" `
+  --dataset "friday_to_yesterday=intent_labels_friday_to_yesterday.csv" `
   --output "intent_cid_count_report.csv"
 ```
 
-The report contains input-row count, distinct CID count, and rows without a CID
-for every intent and an `ALL_INTENTS` row for each named dataset.
+The command creates `intent_cid_count_report.csv` in the repository root. The
+report contains input-row count, distinct CID count, and rows without a CID for
+every intent and an `ALL_INTENTS` row for each named dataset.
 
 ## Current limitation
 
