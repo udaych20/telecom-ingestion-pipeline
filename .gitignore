@@ -3,4 +3,5 @@ __pycache__/
 *.py[cod]
 .env
 output/
+event_app/local.settings.json
 

@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "COSMOS_CONNECTION__accountEndpoint": "https://YOUR-ACCOUNT.documents.azure.com:443/",
+    "COSMOS_DATABASE": "NORA",
+    "EVENT_HUB_NAMESPACE": "YOUR-NAMESPACE.servicebus.windows.net",
+    "EVENT_HUB_NAME": "nora-updates",
+    "EVENT_HUB_CONNECTION__fullyQualifiedNamespace": "YOUR-NAMESPACE.servicebus.windows.net",
+    "EVENT_HUB_CONSUMER_GROUP": "nora-update-subscriber"
+  }
+}

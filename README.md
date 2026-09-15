@@ -14,6 +14,80 @@ A small Python pipeline that reconstructs a complete NORA user interaction from 
 
 Authentication uses `DefaultAzureCredential`; Cosmos account keys are not stored.
 
+## Live NORA update events
+
+`event_app/` is an Azure Functions Python app that watches the NORA Cosmos DB
+change feed. Each insert or update in the configured chat, tool, context, or
+feedback container creates a compact CloudEvents-style notification in Azure
+Event Hubs. The notification includes document, CID, and run identifiers, but not
+the source document or message content.
+
+The same source file contains an Event Hubs-triggered subscriber. Azure Functions
+manages its consumer checkpoint and retries failed invocations.
+
+### Local setup and test
+
+Install Python, Azure CLI, and Node.js first. Install the two Node-based local
+tools and prepare the project with these PowerShell commands:
+
+```powershell
+npm install -g azure-functions-core-tools@4 --unsafe-perm true
+npm install -g azurite
+
+Set-Location D:\git\telecom-ingestion-pipeline\event_app
+
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+
+Copy-Item local.settings.example.json local.settings.json
+az login
+python -m py_compile function_app.py
+```
+
+Edit `local.settings.json` and replace the Cosmos DB and Event Hubs placeholders.
+Do not commit that file. Start Azurite in one PowerShell window:
+
+```powershell
+azurite
+```
+
+Start the Function app in another PowerShell window:
+
+```powershell
+Set-Location D:\git\telecom-ingestion-pipeline\event_app
+.\.venv\Scripts\Activate.ps1
+func start
+```
+
+The Functions host should discover `chat_history_changes`,
+`tool_history_changes`, `context_history_changes`, `feedback_changes`, and
+`nora_update_subscriber`.
+
+In Cosmos DB Data Explorer, insert or update a document in one of the configured
+NORA containers. The terminal should first log `Published NORA change event` and
+then `Received NORA update`. This confirms the complete Cosmos DB -> Function ->
+Event Hubs -> subscriber flow.
+
+### Azure prerequisites
+
+Before testing, create one Cosmos lease container per source container,
+partitioned by `/id`: `leases-chat`, `leases-tools`, `leases-context`, and
+`leases-feedback`. Grant the Function identity Cosmos read/change-feed access,
+lease-container write access, and **Azure Event Hubs Data Sender**. Grant the
+subscriber **Azure Event Hubs Data Receiver**. Configure the values in
+`event_app/local.settings.example.json`; use managed identity in Azure.
+
+### Deploy
+
+After creating and configuring the Azure Function App, publish it with:
+
+```powershell
+Set-Location D:\git\telecom-ingestion-pipeline\event_app
+az login
+func azure functionapp publish YOUR-FUNCTION-APP
+```
+
 ## Start here
 
 - [Quickstart](docs/QUICKSTART.md)
