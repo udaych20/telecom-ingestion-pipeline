@@ -177,7 +177,8 @@ az functionapp config appsettings set `
     "EVENT_HUB_NAMESPACE=$EventHubNamespace" `
     "EVENT_HUB_CONNECTION__fullyQualifiedNamespace=$EventHubNamespace" `
     "EVENT_HUB_NAME=$EventHubName" `
-    "EVENT_HUB_CONSUMER_GROUP=$ConsumerGroup"
+    "EVENT_HUB_CONSUMER_GROUP=$ConsumerGroup" `
+    "NORA_LOG_LEVEL=DEBUG"
 ```
 
 The Function App must also have a valid `AzureWebJobsStorage` configuration. An
@@ -269,6 +270,11 @@ Successful logs contain both messages:
 Published NORA change event ...
 Received NORA update ...
 ```
+
+Additional DEBUG and INFO messages show the received Cosmos batch size, event
+ID, partition key, Event Hubs send result, subscriber partition, sequence number,
+and offset. Failures include a Python stack trace under `Failed to publish` or
+`Failed to process`.
 
 If neither appears, check the Cosmos endpoint, source-container names, leases,
 managed-identity permissions, Function App logs, and network/firewall rules. If

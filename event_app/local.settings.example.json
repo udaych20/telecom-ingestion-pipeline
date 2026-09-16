@@ -8,6 +8,7 @@
     "EVENT_HUB_NAMESPACE": "YOUR-NAMESPACE.servicebus.windows.net",
     "EVENT_HUB_NAME": "nora-updates",
     "EVENT_HUB_CONNECTION__fullyQualifiedNamespace": "YOUR-NAMESPACE.servicebus.windows.net",
-    "EVENT_HUB_CONSUMER_GROUP": "nora-update-subscriber"
+    "EVENT_HUB_CONSUMER_GROUP": "nora-update-subscriber",
+    "NORA_LOG_LEVEL": "DEBUG"
   }
 }

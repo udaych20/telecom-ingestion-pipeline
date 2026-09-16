@@ -19,6 +19,7 @@ import azure.functions as func
 
 
 LOGGER = logging.getLogger("nora.event_app")
+LOGGER.setLevel(os.getenv("NORA_LOG_LEVEL", "INFO").upper())
 DATABASE_NAME = os.getenv("COSMOS_DATABASE", "NORA")
 
 app = func.FunctionApp()
@@ -42,8 +43,16 @@ class EventHubPublisher:
             eventhub_name=required("EVENT_HUB_NAME"),
             credential=self._credential,
         )
+        LOGGER.info(
+            "Event Hubs publisher initialized namespace=%s hub=%s",
+            required("EVENT_HUB_NAMESPACE"),
+            required("EVENT_HUB_NAME"),
+        )
 
     def publish(self, event: dict[str, Any], partition_key: str) -> None:
+        LOGGER.debug(
+            "Publishing event id=%s partition_key=%s", event["id"], partition_key
+        )
         batch = self._client.create_batch(partition_key=partition_key)
         batch.add(
             self._event_data_type(
@@ -51,6 +60,7 @@ class EventHubPublisher:
             )
         )
         self._client.send_batch(batch)
+        LOGGER.info("Event Hubs accepted event id=%s", event["id"])
 
 
 _publisher: Publisher | None = None
@@ -69,6 +79,7 @@ def get_publisher() -> Publisher:
     if _publisher is None:
         with _publisher_lock:
             if _publisher is None:
+                LOGGER.debug("Creating Event Hubs publisher client")
                 _publisher = EventHubPublisher()
     return _publisher
 
@@ -101,7 +112,7 @@ def build_event(container: str, document: dict[str, Any]) -> dict[str, Any]:
         if isinstance(timestamp, (int, float))
         else datetime.now(timezone.utc).isoformat()
     )
-    return {
+    event = {
         "specversion": "1.0",
         "id": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
         "source": f"/cosmos/{DATABASE_NAME}/{container}",
@@ -119,6 +130,15 @@ def build_event(container: str, document: dict[str, Any]) -> dict[str, Any]:
             "run_ids": find_values(document, "run_id"),
         },
     }
+    LOGGER.debug(
+        "Built event id=%s container=%s document_id=%s cids=%s run_ids=%s",
+        event["id"],
+        container,
+        document_id,
+        event["data"]["cids"],
+        event["data"]["run_ids"],
+    )
+    return event
 
 
 def event_partition_key(event: dict[str, Any]) -> str:
@@ -131,12 +151,29 @@ def event_partition_key(event: dict[str, Any]) -> str:
 
 def publish_documents(documents: func.DocumentList, container: str) -> None:
     if not documents:
+        LOGGER.warning("Cosmos trigger returned no documents container=%s", container)
         return
-    publisher = get_publisher()
-    for document in documents:
-        event = build_event(container, dict(document))
-        publisher.publish(event, event_partition_key(event))
-        LOGGER.info("Published NORA change event %s from %s", event["id"], container)
+    LOGGER.info(
+        "Cosmos change batch received container=%s document_count=%s",
+        container,
+        len(documents),
+    )
+    try:
+        publisher = get_publisher()
+        for document in documents:
+            event = build_event(container, dict(document))
+            publisher.publish(event, event_partition_key(event))
+            LOGGER.info(
+                "Published NORA change event id=%s container=%s document_id=%s",
+                event["id"],
+                container,
+                event["subject"],
+            )
+    except Exception:
+        LOGGER.exception(
+            "Failed to publish Cosmos change batch container=%s", container
+        )
+        raise
 
 
 def decode_event(body: str | bytes) -> dict[str, Any]:
@@ -149,6 +186,7 @@ def decode_event(body: str | bytes) -> dict[str, Any]:
     for field in ("id", "source", "type", "data"):
         if field not in event:
             raise ValueError(f"Event is missing {field}")
+    LOGGER.debug("Validated subscriber event id=%s type=%s", event["id"], event["type"])
     return event
 
 
@@ -192,13 +230,25 @@ def feedback_changes(documents: func.DocumentList) -> None:
 )
 def nora_update_subscriber(message: func.EventHubEvent) -> None:
     """Subscriber entry point; add downstream processing here."""
-    event = decode_event(message.get_body())
-    data = event["data"]
     LOGGER.info(
-        "Received NORA update id=%s container=%s document_id=%s cids=%s run_ids=%s",
-        event["id"],
-        data.get("container", ""),
-        data.get("document_id", ""),
-        data.get("cids", []),
-        data.get("run_ids", []),
+        "Event Hubs trigger received partition=%s sequence_number=%s offset=%s",
+        (message.metadata or {}).get("PartitionContext", {}).get(
+            "PartitionId", "unknown"
+        ),
+        message.sequence_number,
+        message.offset,
     )
+    try:
+        event = decode_event(message.get_body())
+        data = event["data"]
+        LOGGER.info(
+            "Received NORA update id=%s container=%s document_id=%s cids=%s run_ids=%s",
+            event["id"],
+            data.get("container", ""),
+            data.get("document_id", ""),
+            data.get("cids", []),
+            data.get("run_ids", []),
+        )
+    except Exception:
+        LOGGER.exception("Failed to process Event Hubs message")
+        raise
