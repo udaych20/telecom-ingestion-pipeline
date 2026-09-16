@@ -28,50 +28,6 @@ the source document or message content.
 The same source file contains an Event Hubs-triggered subscriber. Azure Functions
 manages its consumer checkpoint and retries failed invocations.
 
-### Local setup and test
-
-Install Python, Azure CLI, and Node.js first. Install the two Node-based local
-tools and prepare the project with these PowerShell commands:
-
-```powershell
-npm install -g azure-functions-core-tools@4 --unsafe-perm true
-npm install -g azurite
-
-Set-Location D:\git\telecom-ingestion-pipeline\event_app
-
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-
-Copy-Item local.settings.example.json local.settings.json
-az login
-python -m py_compile function_app.py
-```
-
-Edit `local.settings.json` and replace the Cosmos DB and Event Hubs placeholders.
-Do not commit that file. Start Azurite in one PowerShell window:
-
-```powershell
-azurite
-```
-
-Start the Function app in another PowerShell window:
-
-```powershell
-Set-Location D:\git\telecom-ingestion-pipeline\event_app
-.\.venv\Scripts\Activate.ps1
-func start
-```
-
-The Functions host should discover `chat_history_changes`,
-`tool_history_changes`, `context_history_changes`, `feedback_changes`, and
-`nora_update_subscriber`.
-
-In Cosmos DB Data Explorer, insert or update a document in one of the configured
-NORA containers. The terminal should first log `Published NORA change event` and
-then `Received NORA update`. This confirms the complete Cosmos DB -> Function ->
-Event Hubs -> subscriber flow.
-
 ### Azure prerequisites
 
 Before testing, create one Cosmos lease container per source container,
@@ -83,12 +39,15 @@ subscriber **Azure Event Hubs Data Receiver**. Configure the values in
 
 ### Deploy
 
-After creating and configuring the Azure Function App, publish it with:
+The Windows VM does not need Node.js, npm, Azurite, or Azure Functions Core
+Tools. The runbook packages the three Function project files with PowerShell and
+uses Azure CLI zip deployment with a remote Python build.
 
 ```powershell
 Set-Location D:\git\telecom-ingestion-pipeline\event_app
 az login
-func azure functionapp publish YOUR-FUNCTION-APP
+Compress-Archive -Path function_app.py,host.json,requirements.txt -DestinationPath function-app.zip -Force
+az functionapp deployment source config-zip --resource-group YOUR-RESOURCE-GROUP --name YOUR-FUNCTION-APP --src function-app.zip --build-remote true
 ```
 
 ## Start here

@@ -3,6 +3,35 @@
 Run the sections below in PowerShell, one at a time. Replace every value that
 starts with `YOUR-` before running the Azure setup commands.
 
+## Tools required before you start
+
+No Node.js, npm, Azurite, Docker, or Azure Functions Core Tools are used.
+
+Required:
+
+- **PowerShell 5.1 or later.** Windows Server normally includes it. Check with
+  `$PSVersionTable.PSVersion`.
+- **Azure CLI.** Check with `az version`. If it is not installed and you do not
+  have administrator access, use either:
+  - the official 64-bit Azure CLI ZIP from
+    <https://learn.microsoft.com/cli/azure/install-azure-cli-windows#zip-package>,
+    extract it under your user folder, and call `<folder>\bin\az.cmd`; or
+  - Azure Cloud Shell at <https://shell.azure.com>, which already includes Azure
+    CLI and is already authenticated.
+- **An Azure account with permission** to configure the Function App, Cosmos DB,
+  Event Hubs, managed identities, and role assignments used below.
+
+Optional:
+
+- **Python 3.11 or a version supported by the target Function App.** It is used
+  only for the local syntax check. Azure performs dependency installation during
+  the remote build, so Python is not required to package or deploy the app.
+- **Git.** It is needed only to clone or pull the repository. It is not needed if
+  the project files are already present on the server.
+
+If company policy prevents all local tool installation, use Azure Cloud Shell.
+Upload or clone the `event_app` folder there and run the same Azure CLI commands.
+
 ## 1. Open the project
 
 ```powershell
@@ -11,22 +40,22 @@ Set-Location D:\git\telecom-ingestion-pipeline\event_app
 
 ## 2. Verify the required tools
 
-Python, Azure CLI, and Azure Functions Core Tools v4 must already be installed.
-Core Tools can be installed with the official Windows MSI; npm is not required.
+Azure CLI is required locally unless you are using Azure Cloud Shell. Python is
+optional.
 
 ```powershell
-python --version
+$PSVersionTable.PSVersion
 az version
-func --version
+Get-Command python -ErrorAction SilentlyContinue
+Get-Command git -ErrorAction SilentlyContinue
 ```
 
-## 3. Create the Python environment
+## 3. Optionally validate the Python source
+
+Dependency installation happens remotely in Azure. A local virtual environment
+is not required for deployment. Skip this step if Python is unavailable.
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
 python -m py_compile function_app.py
 ```
 
@@ -166,14 +195,45 @@ The command must print `AzureWebJobsStorage`.
 
 ## 10. Publish the code
 
+Enable the Azure remote Python build. Do not package a local Windows virtual
+environment because the Function App normally runs Python on Linux.
+
 ```powershell
-func azure functionapp publish $FunctionApp
+az functionapp config appsettings set `
+  --resource-group $ResourceGroup `
+  --name $FunctionApp `
+  --settings `
+    "SCM_DO_BUILD_DURING_DEPLOYMENT=true" `
+    "ENABLE_ORYX_BUILD=true"
+
+az functionapp config appsettings delete `
+  --resource-group $ResourceGroup `
+  --name $FunctionApp `
+  --setting-names WEBSITE_RUN_FROM_PACKAGE
+
+Compress-Archive `
+  -Path function_app.py,host.json,requirements.txt `
+  -DestinationPath function-app.zip `
+  -Force
+
+az functionapp deployment source config-zip `
+  --resource-group $ResourceGroup `
+  --name $FunctionApp `
+  --src function-app.zip `
+  --build-remote true
 ```
+
+The ZIP must contain `host.json` at its root. The command above creates that
+layout and Azure installs the packages from `requirements.txt`.
 
 ## 11. Confirm that Azure discovered the functions
 
 ```powershell
-func azure functionapp list-functions $FunctionApp
+az functionapp function list `
+  --resource-group $ResourceGroup `
+  --name $FunctionApp `
+  --query "[].name" `
+  --output table
 ```
 
 Expected functions:
@@ -189,7 +249,15 @@ nora_update_subscriber
 ## 12. Stream logs and test an update
 
 ```powershell
-func azure functionapp logstream $FunctionApp
+az webapp log config `
+  --resource-group $ResourceGroup `
+  --name $FunctionApp `
+  --application-logging filesystem `
+  --level information
+
+az webapp log tail `
+  --resource-group $ResourceGroup `
+  --name $FunctionApp
 ```
 
 Leave that command running. In Azure Portal, open Cosmos DB Data Explorer and
