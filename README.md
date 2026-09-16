@@ -82,6 +82,20 @@ The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
 ## Intent classification timeframe export
 
+`intent_app.py` is the configuration-driven entry point for the initial and
+streaming phases. Set `INITIAL_LOAD_ENABLED` and `STREAM_LOAD_ENABLED` in
+`intent_app_config.env`. When both are true, the historical load completes first
+and the command then starts the blocking Azure Functions host in `event_app/`.
+Running the streaming phase locally requires Azure Functions Core Tools (`func`);
+in Azure, deploy `event_app/` and let the Function App host own the triggers.
+
+The initial phase writes the classified export and intent counts. It also writes
+a dummy training manifest and log when `TRAINING_PLACEHOLDER_ENABLED=true`; this
+records what would be trained but deliberately does not train a model. Set
+`ADLS_UPLOAD_ENABLED=true` to upload these artifacts to the configured Blob/ADLS
+container using `DefaultAzureCredential`. `INITIAL_BATCH_SIZE` controls the
+Cosmos SDK page size.
+
 Configure the Cosmos source and output in `intent_app_config.env`, then classify
 only documents inserted or last updated from Friday evening through the time the
 command starts:

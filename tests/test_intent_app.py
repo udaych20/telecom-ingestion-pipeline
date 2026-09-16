@@ -1,6 +1,9 @@
 import argparse
+import csv
+import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 
 from intent_app import (
     build_intent_count_rows,
@@ -12,6 +15,7 @@ from intent_app import (
     label_records,
     load_cosmos_records,
     parse_iso_time,
+    write_training_placeholder,
 )
 
 
@@ -39,6 +43,35 @@ def screenshot_style_record(text, *, cid="cid-1", record_id="record-1"):
 
 
 class IntentExtractionTests(unittest.TestCase):
+    def test_initial_batch_size_is_passed_to_cosmos_reader(self):
+        class Container:
+            def read_all_items(self, **kwargs):
+                self.arguments = kwargs
+                return []
+
+        container = Container()
+        load_cosmos_records(container, None, batch_size=250)
+        self.assertEqual(container.arguments["max_item_count"], 250)
+
+    def test_writes_explicit_dummy_training_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            csv_path = Path(directory) / "training.csv"
+            log_path = Path(directory) / "training.log"
+            write_training_placeholder(
+                [
+                    {"classification.intent": "query"},
+                    {"classification.intent": "query"},
+                    {"classification.intent": "ticket"},
+                ],
+                csv_path,
+                log_path,
+            )
+            with csv_path.open(encoding="utf-8-sig", newline="") as file:
+                rows = list(csv.DictReader(file))
+            self.assertEqual(rows[0]["intent"], "query")
+            self.assertEqual(rows[0]["record_count"], "2")
+            self.assertIn("model training was not executed", log_path.read_text())
+
     def test_worker_setting_does_not_reach_unsupported_cosmos_query(self):
         class Container:
             def __init__(self):

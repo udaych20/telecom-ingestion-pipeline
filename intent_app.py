@@ -22,6 +22,8 @@ import csv
 import json
 import os
 import re
+import shutil
+import subprocess
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -472,6 +474,7 @@ def load_cosmos_records(
     workers: int = 1,
     start_time: datetime | None = None,
     end_time: datetime | None = None,
+    batch_size: int | None = None,
 ) -> list[dict[str, Any]]:
     """Read source records from Cosmos."""
     if workers != 1:
@@ -481,7 +484,7 @@ def load_cosmos_records(
         )
 
     records: list[dict[str, Any]] = []
-    for item in iter_cosmos_records(container, start_time, end_time):
+    for item in iter_cosmos_records(container, start_time, end_time, batch_size):
         records.append(item)
         if max_records is not None and len(records) >= max_records:
             break
@@ -492,10 +495,13 @@ def iter_cosmos_records(
     container: Any,
     start_time: datetime | None = None,
     end_time: datetime | None = None,
+    batch_size: int | None = None,
 ) -> Iterable[dict[str, Any]]:
     """Read all records or query an inclusive Cosmos `_ts` window."""
     if start_time is None and end_time is None:
-        return container.read_all_items()
+        if batch_size is None:
+            return container.read_all_items()
+        return container.read_all_items(max_item_count=batch_size)
 
     filters: list[str] = []
     parameters: list[dict[str, Any]] = []
@@ -510,11 +516,14 @@ def iter_cosmos_records(
             {"name": "@end_ts", "value": int(end_time.timestamp())}
         )
 
-    return container.query_items(
-        query=f"SELECT * FROM c WHERE {' AND '.join(filters)} ORDER BY c._ts DESC",
-        parameters=parameters,
-        enable_cross_partition_query=True,
-    )
+    query_options: dict[str, Any] = {
+        "query": f"SELECT * FROM c WHERE {' AND '.join(filters)} ORDER BY c._ts DESC",
+        "parameters": parameters,
+        "enable_cross_partition_query": True,
+    }
+    if batch_size is not None:
+        query_options["max_item_count"] = batch_size
+    return container.query_items(**query_options)
 
 
 def cosmos_record_key(record: dict[str, Any]) -> str:
@@ -692,6 +701,12 @@ def required_env(name: str) -> str:
     return value
 
 
+def optional_env_time(name: str) -> datetime | None:
+    """Parse an optional timezone-aware timestamp from configuration."""
+    value = os.environ.get(name, "").strip()
+    return parse_iso_time(value) if value else None
+
+
 def parse_iso_time(value: str) -> datetime:
     normalized = value.strip()
     if normalized.endswith(("Z", "z")):
@@ -738,9 +753,59 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def main() -> None:
-    args = parse_args()
-    load_env_file(Path(args.config))
+def write_training_placeholder(
+    labels: list[dict[str, Any]], csv_path: Path, log_path: Path
+) -> None:
+    """Write an explicit placeholder manifest; no model is trained yet."""
+    counts = Counter(str(label.get("classification.intent", "")) for label in labels)
+    rows = [
+        {
+            "intent": intent,
+            "record_count": count,
+            "status": "pending_training_implementation",
+        }
+        for intent, count in sorted(counts.items())
+        if intent
+    ]
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=("intent", "record_count", "status"))
+        writer.writeheader()
+        writer.writerows(rows)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        f"{datetime.now(timezone.utc).isoformat()} "
+        f"training placeholder created for {len(labels)} classified records; "
+        "model training was not executed.\n",
+        encoding="utf-8",
+    )
+
+
+def upload_files_to_blob(paths: Iterable[Path], credential: Any) -> list[str]:
+    """Upload initial-load artifacts to Blob Storage/ADLS Gen2."""
+    try:
+        from azure.storage.blob import BlobServiceClient
+    except ImportError as error:
+        raise RuntimeError(
+            "Blob export requires azure-storage-blob; run pip install -r requirements.txt"
+        ) from error
+
+    account_url = required_env("ADLS_ACCOUNT_URL")
+    container_name = required_env("ADLS_CONTAINER")
+    prefix = os.environ.get("ADLS_BLOB_PREFIX", "intent-training").strip("/")
+    service = BlobServiceClient(account_url=account_url, credential=credential)
+    container = service.get_container_client(container_name)
+    uploaded: list[str] = []
+    for path in paths:
+        blob_name = f"{prefix}/{path.name}" if prefix else path.name
+        with path.open("rb") as data:
+            container.upload_blob(name=blob_name, data=data, overwrite=True)
+        uploaded.append(blob_name)
+    return uploaded
+
+
+def run_initial_load(args: argparse.Namespace) -> None:
+    """Run the configured historical extraction and classification once."""
 
     endpoint = required_env("COSMOS_ENDPOINT")
     database_name = required_env("COSMOS_DATABASE")
@@ -759,6 +824,7 @@ def main() -> None:
         raise ValueError("INTENT_COUNT_OUTPUT must differ from INTENT_OUTPUT")
     max_records = env_int("INTENT_MAX_RECORDS")
     workers = env_int("INTENT_MAX_WORKERS") or 1
+    batch_size = env_int("INITIAL_BATCH_SIZE")
     find_missing = env_bool("INTENT_FIND_MISSING", False)
     missing_output_path = Path(
         os.environ.get("INTENT_MISSING_OUTPUT", "intent_labels_missing.csv")
@@ -769,22 +835,32 @@ def main() -> None:
         "INTENT_TARGET_CONTAINER", "intent-labels"
     ).strip()
 
+    start_time = args.start_time or optional_env_time("INITIAL_START_TIME")
+    end_time = args.end_time or optional_env_time("INITIAL_END_TIME")
+    if end_time is not None and start_time is None:
+        raise ValueError("INITIAL_END_TIME requires INITIAL_START_TIME")
+    if start_time is not None:
+        end_time = end_time or datetime.now(timezone.utc)
+        if start_time > end_time:
+            raise ValueError("INITIAL_START_TIME must be earlier than INITIAL_END_TIME")
+
     credential = DefaultAzureCredential()
     client = CosmosClient(endpoint, credential=credential)
     database = client.get_database_client(database_name)
     source_container = database.get_container_client(container_name)
 
-    if args.start_time is not None:
+    if start_time is not None:
         print(
             "Filtering Cosmos documents by _ts (UTC, inclusive): "
-            f"{args.start_time.isoformat()} through {args.end_time.isoformat()}"
+            f"{start_time.isoformat()} through {end_time.isoformat()}"
         )
     records = load_cosmos_records(
         source_container,
         max_records,
         workers,
-        args.start_time,
-        args.end_time,
+        start_time,
+        end_time,
+        batch_size,
     )
     labels = label_records(records, include_source_fields=include_source_fields)
     if output_path.suffix.lower() == ".csv":
@@ -805,8 +881,8 @@ def main() -> None:
         missing_records, inventory_count = find_missing_cosmos_records(
             source_container,
             records,
-            args.start_time,
-            args.end_time,
+            start_time,
+            end_time,
         )
         combined_labels = label_records(
             [*records, *missing_records],
@@ -839,6 +915,19 @@ def main() -> None:
         target = database.get_container_client(target_container_name)
         write_labels_to_container(target, labels)
 
+    artifact_paths = [output_path, count_output_path]
+    if env_bool("TRAINING_PLACEHOLDER_ENABLED", True):
+        training_csv = Path(
+            os.environ.get("TRAINING_MANIFEST_OUTPUT", "training_manifest.csv")
+        )
+        training_log = Path(os.environ.get("TRAINING_LOG_OUTPUT", "training.log"))
+        write_training_placeholder(labels, training_csv, training_log)
+        artifact_paths.extend((training_csv, training_log))
+
+    uploaded: list[str] = []
+    if env_bool("ADLS_UPLOAD_ENABLED", False):
+        uploaded = upload_files_to_blob(artifact_paths, credential)
+
     counts = Counter(label["classification.intent"] for label in labels)
     review_count = sum(
         bool(label["classification.needs_human_review"]) for label in labels
@@ -858,6 +947,43 @@ def main() -> None:
         print(f"Missing-record output: {missing_output_path.resolve()}")
     if write_back:
         print(f"Cosmos output container: {target_container_name}")
+    if uploaded:
+        print(f"Blob/ADLS artifacts: {', '.join(uploaded)}")
+
+    client.close()
+    credential.close()
+
+
+def run_stream_host() -> None:
+    """Start the Azure Functions host that owns change-feed/Event Hub triggers."""
+    executable = shutil.which("func")
+    if executable is None:
+        raise RuntimeError(
+            "Streaming requires Azure Functions Core Tools ('func') on this machine. "
+            "In Azure, deploy event_app and let the Function App host run it."
+        )
+    event_app_dir = Path(__file__).with_name("event_app")
+    print(f"Starting streaming Function host from {event_app_dir.resolve()}")
+    subprocess.run(
+        [executable, "start", "--script-root", str(event_app_dir)],
+        check=True,
+        env=os.environ.copy(),
+    )
+
+
+def main() -> None:
+    args = parse_args()
+    load_env_file(Path(args.config))
+    initial_enabled = env_bool("INITIAL_LOAD_ENABLED", True)
+    stream_enabled = env_bool("STREAM_LOAD_ENABLED", False)
+    if not initial_enabled and not stream_enabled:
+        raise ValueError(
+            "At least one of INITIAL_LOAD_ENABLED or STREAM_LOAD_ENABLED must be true"
+        )
+    if initial_enabled:
+        run_initial_load(args)
+    if stream_enabled:
+        run_stream_host()
 
 
 if __name__ == "__main__":

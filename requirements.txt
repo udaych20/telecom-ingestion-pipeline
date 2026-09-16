@@ -1,3 +1,6 @@
 azure-cosmos
+azure-eventhub
+azure-functions
 azure-identity
+azure-storage-blob
 python-dotenv
