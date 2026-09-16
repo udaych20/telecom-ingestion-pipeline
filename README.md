@@ -16,6 +16,9 @@ Authentication uses `DefaultAzureCredential`; Cosmos account keys are not stored
 
 ## Live NORA update events
 
+For a command-by-command Azure Windows VM test, use
+[`event_app/AZURE_WINDOWS_TEST.md`](event_app/AZURE_WINDOWS_TEST.md).
+
 `event_app/` is an Azure Functions Python app that watches the NORA Cosmos DB
 change feed. Each insert or update in the configured chat, tool, context, or
 feedback container creates a compact CloudEvents-style notification in Azure

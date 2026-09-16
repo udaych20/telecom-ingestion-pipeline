@@ -14,5 +14,6 @@
 | [Operations](OPERATIONS.md) | Operators | Troubleshooting and readiness |
 | [Security](SECURITY.md) | Security and data owners | Identity, secrets, and personal data |
 | [Development](DEVELOPMENT.md) | Contributors | Spec-driven change process |
+| [Azure event-driven architecture](Azure_Event_Driven_Architecture_Deep_Dive_Complete.docx) | Architecture and engineering | Event Hubs design, scaling, reliability, and production guidance |
 
 The product specification is authoritative for intended behavior. The data-contract document is authoritative for correlation and export schemas. When they conflict with implementation, treat that as a defect and resolve both in the same change.
