@@ -26,6 +26,8 @@ Do not place client secrets, access tokens, or Cosmos account keys in `.env`. `D
 | Variable | Default | Description |
 |---|---|---|
 | `CSV_OUTPUT_DIR` | `output/csv` | Classified, count, missing-record, and manifest CSV directory |
+| `INTENT_SEPARATE_CLARIFICATION` | `false` | Write clarification_needed to a separate CSV; other intents stay in the main CSV |
+| `INTENT_CLARIFICATION_OUTPUT` | `intent_clarification_needed.csv` | Separate clarification filename in CSV_OUTPUT_DIR |
 | `FEATURE_OUTPUT_DIR` | `output/features` | Foundry train, validation, test, and feature-report directory |
 | `LOG_OUTPUT_DIR` | `output/logs` | Training-placeholder log directory |
 | `FEATURE_BUILD_ENABLED` | `false` | Generate Foundry-compatible feature datasets after the classified CSV is written |

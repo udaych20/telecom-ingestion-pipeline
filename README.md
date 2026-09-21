@@ -82,6 +82,15 @@ The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
 ## Intent classification timeframe export
 
+To separate clarification records, set `INTENT_SEPARATE_CLARIFICATION=true`.
+The main classification CSV then contains all other intents, and
+`INTENT_CLARIFICATION_OUTPUT` (default `intent_clarification_needed.csv`) contains
+only `clarification_needed`, in `CSV_OUTPUT_DIR`. CSV has no worksheet support,
+so these are two files with identical columns, including headers for empty groups.
+Both files are included in optional Blob uploads. Counts, Cosmos write-back, and
+Feature Build still receive all labels and retain their existing filtering rules.
+The flag defaults to false and requires CSV output when enabled.
+
 `intent_app.py` is the configuration-driven entry point for the initial and
 streaming phases. Set `INITIAL_LOAD_ENABLED` and `STREAM_LOAD_ENABLED` in
 `intent_app_config.env`. When both are true, the historical load completes first

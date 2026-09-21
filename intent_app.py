@@ -578,13 +578,51 @@ def write_jsonl(path: Path, labels: Iterable[dict[str, Any]]) -> None:
             file.write(json.dumps(label, ensure_ascii=False) + "\n")
 
 
-def write_csv(path: Path, labels: list[dict[str, Any]]) -> None:
+def write_csv(
+    path: Path,
+    labels: list[dict[str, Any]],
+    fieldnames: list[str] | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = list(dict.fromkeys(key for label in labels for key in label))
+    if fieldnames is None:
+        fieldnames = list(dict.fromkeys(key for label in labels for key in label))
     with path.open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(labels)
+
+
+def write_classification_output(
+    path: Path,
+    labels: list[dict[str, Any]],
+    clarification_path: Path | None = None,
+) -> list[Path]:
+    """Optionally separate clarification rows while retaining the same CSV columns."""
+    if clarification_path is not None:
+        if path.suffix.lower() != ".csv" or clarification_path.suffix.lower() != ".csv":
+            raise ValueError("Separate clarification output requires two CSV paths")
+        if path.resolve() == clarification_path.resolve():
+            raise ValueError("Clarification output must differ from INTENT_OUTPUT")
+        columns = list(dict.fromkeys(key for label in labels for key in label))
+        if not columns:
+            columns = ["source_id", "conversation_id", "classification.intent"]
+        remaining = []
+        clarification = []
+        for label in labels:
+            if label.get("classification.intent") == "clarification_needed":
+                clarification.append(label)
+            else:
+                remaining.append(label)
+        write_csv(path, remaining, columns)
+        write_csv(clarification_path, clarification, columns)
+        return [path, clarification_path]
+    if path.suffix.lower() == ".csv":
+        write_csv(path, labels)
+    elif path.suffix.lower() in {".jsonl", ".ndjson"}:
+        write_jsonl(path, labels)
+    else:
+        raise ValueError("INTENT_OUTPUT must end in .csv, .jsonl, or .ndjson")
+    return [path]
 
 
 def build_intent_count_rows(
@@ -1165,12 +1203,16 @@ def run_initial_load(args: argparse.Namespace) -> None:
         batch_size,
     )
     labels = label_records(records, include_source_fields=include_source_fields)
-    if output_path.suffix.lower() == ".csv":
-        write_csv(output_path, labels)
-    elif output_path.suffix.lower() in {".jsonl", ".ndjson"}:
-        write_jsonl(output_path, labels)
-    else:
-        raise ValueError("--output must end in .csv, .jsonl, or .ndjson")
+    clarification_path = None
+    if env_bool("INTENT_SEPARATE_CLARIFICATION", False):
+        clarification_path = configured_output_path(
+            "INTENT_CLARIFICATION_OUTPUT", "intent_clarification_needed.csv", "CSV_OUTPUT_DIR"
+        )
+        if clarification_path.resolve() in {
+            count_output_path.resolve(), missing_output_path.resolve()
+        }:
+            raise ValueError("Clarification output must differ from count and missing outputs")
+    classification_paths = write_classification_output(output_path, labels, clarification_path)
     write_intent_count_csv(count_output_path, labels)
 
     missing_records: list[dict[str, Any]] = []
@@ -1217,7 +1259,7 @@ def run_initial_load(args: argparse.Namespace) -> None:
         target = database.get_container_client(target_container_name)
         write_labels_to_container(target, labels)
 
-    artifact_paths = [output_path, count_output_path]
+    artifact_paths = [*classification_paths, count_output_path]
     if env_bool("TRAINING_PLACEHOLDER_ENABLED", True):
         training_csv = configured_output_path(
             "TRAINING_MANIFEST_OUTPUT", "training_manifest.csv", "CSV_OUTPUT_DIR"
@@ -1257,6 +1299,8 @@ def run_initial_load(args: argparse.Namespace) -> None:
         print(f"  {intent}: {count:,}")
     print(f"Human review recommended: {review_count:,}")
     print(f"Local output: {output_path.resolve()}")
+    if clarification_path is not None:
+        print(f"Clarification output: {clarification_path.resolve()}")
     print(f"Intent count output: {count_output_path.resolve()}")
     if find_missing:
         print(f"Fresh Cosmos inventory: {inventory_count:,}")

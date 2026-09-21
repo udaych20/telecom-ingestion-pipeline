@@ -18,6 +18,7 @@ from intent_app import (
     parse_iso_time,
     submit_foundry_training,
     write_foundry_jsonl,
+    write_classification_output,
     write_training_placeholder,
 )
 
@@ -46,6 +47,42 @@ def screenshot_style_record(text, *, cid="cid-1", record_id="record-1"):
 
 
 class IntentExtractionTests(unittest.TestCase):
+    def test_classification_csv_split_preserves_rows_and_empty_headers(self):
+        labels = [
+            {"source_id": "1", "classification.intent": "query"},
+            {"source_id": "2", "classification.intent": "clarification_needed"},
+            {"source_id": "3", "classification.intent": "general"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            main = Path(directory) / "labels.csv"
+            clarification = Path(directory) / "clarification.csv"
+            def read(path):
+                with path.open(encoding="utf-8-sig", newline="") as file:
+                    reader = csv.DictReader(file)
+                    return reader.fieldnames, list(reader)
+
+            self.assertEqual(
+                write_classification_output(main, labels, clarification),
+                [main, clarification],
+            )
+            self.assertEqual(read(main)[1], [labels[0], labels[2]])
+            self.assertEqual(read(clarification)[1], [labels[1]])
+            self.assertEqual(read(main)[0], read(clarification)[0])
+            write_classification_output(main, [labels[1]], clarification)
+            self.assertEqual(read(main)[1], [])
+            self.assertEqual(read(main)[0], read(clarification)[0])
+            write_classification_output(main, labels)
+            self.assertEqual(read(main)[1], labels)
+            self.assertEqual(len(labels), 3)
+
+    def test_classification_split_rejects_overwrite_and_non_csv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "labels.csv"
+            with self.assertRaises(ValueError):
+                write_classification_output(path, [], path)
+            with self.assertRaises(ValueError):
+                write_classification_output(path.with_suffix(".jsonl"), [], path)
+
     def test_submits_foundry_training_after_files_are_processed(self):
         class Result:
             def __init__(self, result_id, status="processed"):
