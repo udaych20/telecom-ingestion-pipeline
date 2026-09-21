@@ -1,6 +1,8 @@
 azure-cosmos
+azure-ai-projects
 azure-eventhub
 azure-functions
 azure-identity
 azure-storage-blob
+openai
 python-dotenv

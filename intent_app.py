@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -131,6 +133,12 @@ ISSUE_FIELDS = (
     "issue_description",
     "description",
     "summary",
+)
+
+PII_PATTERNS = (
+    (re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b"), "[EMAIL]"),
+    (re.compile(r"(?<!\d)\+?\d[\d ()-]{6,}\d(?!\d)"), "[PHONE_OR_ACCOUNT]"),
+    (re.compile(r"\b\d{14,16}\b"), "[DEVICE_ID]"),
 )
 
 
@@ -707,6 +715,15 @@ def optional_env_time(name: str) -> datetime | None:
     return parse_iso_time(value) if value else None
 
 
+def configured_output_path(setting: str, default: str, directory_setting: str) -> Path:
+    """Put a bare output filename in its configured artifact directory."""
+    path = Path(os.environ.get(setting, default).strip())
+    if path.is_absolute() or path.parent != Path("."):
+        return path
+    directory = Path(os.environ.get(directory_setting, ".").strip() or ".")
+    return directory / path
+
+
 def parse_iso_time(value: str) -> datetime:
     normalized = value.strip()
     if normalized.endswith(("Z", "z")):
@@ -781,6 +798,287 @@ def write_training_placeholder(
     )
 
 
+def redact_training_text(text: str) -> str:
+    """Apply conservative PII masking to model-training text."""
+    redacted = text
+    for pattern, replacement in PII_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
+def foundry_split_for_cid(
+    cid: str, train_percent: int, validation_percent: int, seed: str
+) -> str:
+    """Assign a CID deterministically so conversations never cross datasets."""
+    bucket = int.from_bytes(
+        hashlib.sha256(f"{seed}:{cid}".encode("utf-8")).digest()[:8], "big"
+    ) % 100
+    if bucket < train_percent:
+        return "train"
+    if bucket < train_percent + validation_percent:
+        return "validation"
+    return "test"
+
+
+def build_foundry_datasets(
+    labels: Iterable[dict[str, Any]],
+    *,
+    train_percent: int = 80,
+    validation_percent: int = 10,
+    test_percent: int = 10,
+    seed: str = "nora-intent-v1",
+    redact_pii: bool = True,
+    exclude_needs_review: bool = True,
+    require_reviewed: bool = False,
+    system_prompt: str = (
+        "Classify the NORA customer request as ticket, modify, rca, query, "
+        "general, or clarification_needed. Return only the intent."
+    ),
+) -> tuple[dict[str, list[dict[str, Any]]], Counter[str]]:
+    """Build deterministic chat-format datasets and rejection statistics."""
+    if min(train_percent, validation_percent, test_percent) < 0:
+        raise ValueError("Foundry split percentages cannot be negative")
+    if train_percent + validation_percent + test_percent != 100:
+        raise ValueError("Foundry train, validation, and test percentages must total 100")
+
+    datasets: dict[str, list[dict[str, Any]]] = {
+        "train": [],
+        "validation": [],
+        "test": [],
+    }
+    rejected: Counter[str] = Counter()
+    seen: set[tuple[str, str]] = set()
+    text_field = "extracted.user_text[messages[].data.content]"
+
+    for label in labels:
+        cid = str(label.get("conversation_id", "")).strip()
+        text = compact_text(label.get(text_field))
+        intent = str(label.get("classification.intent", "")).strip()
+        if not cid:
+            rejected["missing_cid"] += 1
+            continue
+        if not text:
+            rejected["missing_user_text"] += 1
+            continue
+        if not intent:
+            rejected["missing_intent"] += 1
+            continue
+        if exclude_needs_review and bool(
+            label.get("classification.needs_human_review", False)
+        ):
+            rejected["needs_human_review"] += 1
+            continue
+        reviewed_flag = label.get("human_reviewed", label.get("source.human_reviewed"))
+        review_status = label.get(
+            "review.status", label.get("source.review.status", "")
+        )
+        reviewed = reviewed_flag is True or str(review_status).strip().lower() in {
+            "approved",
+            "accepted",
+        }
+        if require_reviewed and not reviewed:
+            rejected["not_human_reviewed"] += 1
+            continue
+
+        if redact_pii:
+            text = redact_training_text(text)
+        duplicate_key = (text.casefold(), intent.casefold())
+        if duplicate_key in seen:
+            rejected["duplicate"] += 1
+            continue
+        seen.add(duplicate_key)
+        split = foundry_split_for_cid(cid, train_percent, validation_percent, seed)
+        datasets[split].append(
+            {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text},
+                    {"role": "assistant", "content": intent},
+                ]
+            }
+        )
+    return datasets, rejected
+
+
+def write_foundry_jsonl(path: Path, examples: Iterable[dict[str, Any]]) -> None:
+    """Write Foundry chat JSONL as UTF-8 with BOM, one example per line."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="\n") as file:
+        for example in examples:
+            file.write(json.dumps(example, ensure_ascii=False, separators=(",", ":")))
+            file.write("\n")
+
+
+def write_feature_report(
+    path: Path,
+    datasets: dict[str, list[dict[str, Any]]],
+    rejected: Counter[str],
+) -> None:
+    """Write auditable accepted/rejected counts for the feature build."""
+    rows = [
+        {"category": "accepted", "name": split, "record_count": len(examples)}
+        for split, examples in datasets.items()
+    ]
+    rows.extend(
+        {"category": "rejected", "name": reason, "record_count": count}
+        for reason, count in sorted(rejected.items())
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=("category", "name", "record_count"))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def create_foundry_artifacts(
+    labels: list[dict[str, Any]],
+) -> tuple[dict[str, Path], dict[str, int]]:
+    """Build and save the configured Foundry training datasets."""
+    output_paths = {
+        "train": configured_output_path(
+            "FOUNDRY_TRAIN_OUTPUT", "foundry_train.jsonl", "FEATURE_OUTPUT_DIR"
+        ),
+        "validation": configured_output_path(
+            "FOUNDRY_VALIDATION_OUTPUT",
+            "foundry_validation.jsonl",
+            "FEATURE_OUTPUT_DIR",
+        ),
+        "test": configured_output_path(
+            "FOUNDRY_TEST_OUTPUT", "foundry_test.jsonl", "FEATURE_OUTPUT_DIR"
+        ),
+    }
+    report_path = configured_output_path(
+        "FEATURE_REPORT_OUTPUT", "foundry_feature_report.csv", "FEATURE_OUTPUT_DIR"
+    )
+    datasets, rejected = build_foundry_datasets(
+        labels,
+        train_percent=env_int("TRAIN_PERCENT") or 80,
+        validation_percent=env_int("VALIDATION_PERCENT") or 10,
+        test_percent=env_int("TEST_PERCENT") or 10,
+        seed=os.environ.get("FEATURE_SPLIT_SEED", "nora-intent-v1"),
+        redact_pii=env_bool("FEATURE_REDACT_PII", True),
+        exclude_needs_review=env_bool("FEATURE_EXCLUDE_NEEDS_REVIEW", True),
+        require_reviewed=env_bool("FEATURE_REQUIRE_REVIEWED_LABELS", False),
+    )
+    for split, path in output_paths.items():
+        write_foundry_jsonl(path, datasets[split])
+    write_feature_report(report_path, datasets, rejected)
+
+    paths = {**output_paths, "report": report_path}
+    counts = {split: len(examples) for split, examples in datasets.items()}
+    return paths, counts
+
+
+def wait_for_foundry_file(
+    client: Any, file_id: str, timeout_seconds: int, poll_seconds: int
+) -> Any:
+    """Wait until Foundry has validated an uploaded fine-tuning file."""
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        uploaded_file = client.files.retrieve(file_id)
+        status = str(getattr(uploaded_file, "status", "")).lower()
+        if status == "processed":
+            return uploaded_file
+        if status in {"error", "failed", "cancelled"}:
+            details = getattr(uploaded_file, "status_details", None)
+            raise RuntimeError(
+                f"Foundry rejected file {file_id}: status={status}, details={details}"
+            )
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Timed out waiting for Foundry file {file_id}")
+        time.sleep(poll_seconds)
+
+
+def submit_foundry_training(
+    client: Any,
+    train_path: Path,
+    validation_path: Path,
+    *,
+    model: str,
+    suffix: str,
+    seed: int | None,
+    training_type: str,
+    timeout_seconds: int,
+    poll_seconds: int,
+) -> dict[str, Any]:
+    """Upload datasets and submit one supervised fine-tuning job."""
+    with train_path.open("rb") as train_file:
+        train_upload = client.files.create(file=train_file, purpose="fine-tune")
+    with validation_path.open("rb") as validation_file:
+        validation_upload = client.files.create(
+            file=validation_file, purpose="fine-tune"
+        )
+
+    wait_for_foundry_file(client, train_upload.id, timeout_seconds, poll_seconds)
+    wait_for_foundry_file(
+        client, validation_upload.id, timeout_seconds, poll_seconds
+    )
+    request: dict[str, Any] = {
+        "training_file": train_upload.id,
+        "validation_file": validation_upload.id,
+        "model": model,
+    }
+    if suffix:
+        request["suffix"] = suffix
+    if seed is not None:
+        request["seed"] = seed
+    if training_type:
+        request["extra_body"] = {"trainingType": training_type}
+    job = client.fine_tuning.jobs.create(**request)
+    return {
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "job_id": job.id,
+        "status": getattr(job, "status", "submitted"),
+        "model": model,
+        "training_file_id": train_upload.id,
+        "validation_file_id": validation_upload.id,
+    }
+
+
+def start_foundry_training(
+    feature_paths: dict[str, Path], feature_counts: dict[str, int]
+) -> tuple[Path, dict[str, Any]]:
+    """Create a Foundry client, submit training, and persist the job receipt."""
+    if feature_counts["train"] < 10:
+        raise ValueError("Foundry fine-tuning requires at least 10 training examples")
+    if feature_counts["validation"] < 1:
+        raise ValueError("Automated Foundry training requires validation examples")
+    try:
+        from azure.ai.projects import AIProjectClient
+    except ImportError as error:
+        raise RuntimeError(
+            "Foundry training requires azure-ai-projects and openai; "
+            "run pip install -r requirements.txt"
+        ) from error
+
+    project = AIProjectClient(
+        endpoint=required_env("FOUNDRY_PROJECT_ENDPOINT"),
+        credential=DefaultAzureCredential(),
+    )
+    client = project.get_openai_client()
+    receipt = submit_foundry_training(
+        client,
+        feature_paths["train"],
+        feature_paths["validation"],
+        model=required_env("FOUNDRY_FINE_TUNE_MODEL"),
+        suffix=os.environ.get("FOUNDRY_FINE_TUNE_SUFFIX", "nora-intent").strip(),
+        seed=env_int("FOUNDRY_FINE_TUNE_SEED"),
+        training_type=os.environ.get(
+            "FOUNDRY_FINE_TUNE_TRAINING_TYPE", "GlobalStandard"
+        ).strip(),
+        timeout_seconds=env_int("FOUNDRY_FILE_TIMEOUT_SECONDS") or 900,
+        poll_seconds=env_int("FOUNDRY_POLL_SECONDS") or 10,
+    )
+    receipt_path = configured_output_path(
+        "FOUNDRY_TRAINING_RECEIPT", "foundry_training_job.json", "LOG_OUTPUT_DIR"
+    )
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(
+        json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return receipt_path, receipt
+
+
 def upload_files_to_blob(paths: Iterable[Path], credential: Any) -> list[str]:
     """Upload initial-load artifacts to Blob Storage/ADLS Gen2."""
     try:
@@ -810,11 +1108,15 @@ def run_initial_load(args: argparse.Namespace) -> None:
     endpoint = required_env("COSMOS_ENDPOINT")
     database_name = required_env("COSMOS_DATABASE")
     container_name = required_env("COSMOS_CONTAINER")
-    output_path = Path(os.environ.get("INTENT_OUTPUT", "intent_labels_all.csv"))
+    output_path = configured_output_path(
+        "INTENT_OUTPUT", "intent_labels_all.csv", "CSV_OUTPUT_DIR"
+    )
     default_count_path = output_path.with_name(f"{output_path.stem}_counts.csv")
     configured_count_path = os.environ.get("INTENT_COUNT_OUTPUT", "").strip()
     count_output_path = (
-        Path(configured_count_path)
+        configured_output_path(
+            "INTENT_COUNT_OUTPUT", configured_count_path, "CSV_OUTPUT_DIR"
+        )
         if configured_count_path
         else default_count_path
     )
@@ -826,8 +1128,8 @@ def run_initial_load(args: argparse.Namespace) -> None:
     workers = env_int("INTENT_MAX_WORKERS") or 1
     batch_size = env_int("INITIAL_BATCH_SIZE")
     find_missing = env_bool("INTENT_FIND_MISSING", False)
-    missing_output_path = Path(
-        os.environ.get("INTENT_MISSING_OUTPUT", "intent_labels_missing.csv")
+    missing_output_path = configured_output_path(
+        "INTENT_MISSING_OUTPUT", "intent_labels_missing.csv", "CSV_OUTPUT_DIR"
     )
     include_source_fields = env_bool("INTENT_INCLUDE_SOURCE_FIELDS", True)
     write_back = env_bool("INTENT_WRITE_BACK", False)
@@ -917,12 +1219,27 @@ def run_initial_load(args: argparse.Namespace) -> None:
 
     artifact_paths = [output_path, count_output_path]
     if env_bool("TRAINING_PLACEHOLDER_ENABLED", True):
-        training_csv = Path(
-            os.environ.get("TRAINING_MANIFEST_OUTPUT", "training_manifest.csv")
+        training_csv = configured_output_path(
+            "TRAINING_MANIFEST_OUTPUT", "training_manifest.csv", "CSV_OUTPUT_DIR"
         )
-        training_log = Path(os.environ.get("TRAINING_LOG_OUTPUT", "training.log"))
+        training_log = configured_output_path(
+            "TRAINING_LOG_OUTPUT", "training.log", "LOG_OUTPUT_DIR"
+        )
         write_training_placeholder(labels, training_csv, training_log)
         artifact_paths.extend((training_csv, training_log))
+
+    foundry_counts: dict[str, int] | None = None
+    foundry_receipt: dict[str, Any] | None = None
+    if env_bool("FEATURE_BUILD_ENABLED", False):
+        foundry_paths, foundry_counts = create_foundry_artifacts(labels)
+        artifact_paths.extend(foundry_paths.values())
+        if env_bool("FOUNDRY_TRAINING_ENABLED", False):
+            receipt_path, foundry_receipt = start_foundry_training(
+                foundry_paths, foundry_counts
+            )
+            artifact_paths.append(receipt_path)
+    elif env_bool("FOUNDRY_TRAINING_ENABLED", False):
+        raise ValueError("FOUNDRY_TRAINING_ENABLED requires FEATURE_BUILD_ENABLED=true")
 
     uploaded: list[str] = []
     if env_bool("ADLS_UPLOAD_ENABLED", False):
@@ -949,6 +1266,16 @@ def run_initial_load(args: argparse.Namespace) -> None:
         print(f"Cosmos output container: {target_container_name}")
     if uploaded:
         print(f"Blob/ADLS artifacts: {', '.join(uploaded)}")
+    if foundry_counts is not None:
+        print(
+            "Foundry feature datasets: "
+            + ", ".join(f"{name}={count}" for name, count in foundry_counts.items())
+        )
+    if foundry_receipt is not None:
+        print(
+            f"Foundry fine-tuning job: {foundry_receipt['job_id']} "
+            f"({foundry_receipt['status']})"
+        )
 
     client.close()
     credential.close()

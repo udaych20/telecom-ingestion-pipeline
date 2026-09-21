@@ -18,3 +18,34 @@ Configuration is loaded from process environment variables and an optional `.env
 Do not place client secrets, access tokens, or Cosmos account keys in `.env`. `DefaultAzureCredential` provides authentication.
 
 `BATCH_LIMIT` and `BATCH_SIZE` affect `--all` and `--all-complete`, not a single chat CID. `BATCH_LIMIT` must be non-negative and `BATCH_SIZE` must be greater than zero. Environment settings are loaded once when the process starts.
+
+## Intent Finder initial-load and feature outputs
+
+`intent_app.py` uses the following settings from `intent_app_config.env`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `CSV_OUTPUT_DIR` | `output/csv` | Classified, count, missing-record, and manifest CSV directory |
+| `FEATURE_OUTPUT_DIR` | `output/features` | Foundry train, validation, test, and feature-report directory |
+| `LOG_OUTPUT_DIR` | `output/logs` | Training-placeholder log directory |
+| `FEATURE_BUILD_ENABLED` | `false` | Generate Foundry-compatible feature datasets after the classified CSV is written |
+| `TRAIN_PERCENT` | `80` | CID-level training split percentage |
+| `VALIDATION_PERCENT` | `10` | CID-level validation split percentage |
+| `TEST_PERCENT` | `10` | CID-level test split percentage |
+| `FEATURE_REDACT_PII` | `true` | Mask common email, phone/account, and device identifiers |
+| `FEATURE_EXCLUDE_NEEDS_REVIEW` | `true` | Exclude classifications marked for human review |
+| `FEATURE_REQUIRE_REVIEWED_LABELS` | `false` | Require an explicit approved/accepted review marker |
+| `FOUNDRY_TRAINING_ENABLED` | `false` | Upload datasets and submit a paid Foundry fine-tuning job |
+| `FOUNDRY_PROJECT_ENDPOINT` | None | Foundry project endpoint used by `DefaultAzureCredential` |
+| `FOUNDRY_FINE_TUNE_MODEL` | None | Supported base model and version to fine-tune |
+| `FOUNDRY_FINE_TUNE_SUFFIX` | `nora-intent` | Name suffix for the customized model |
+| `FOUNDRY_FINE_TUNE_TRAINING_TYPE` | `GlobalStandard` | Foundry training type |
+| `FOUNDRY_TRAINING_RECEIPT` | `foundry_training_job.json` | Local job/file ID receipt |
+
+Bare output filenames are placed in the corresponding directory. Absolute paths
+and configured paths that already contain a directory are preserved. The three
+split percentages must total 100.
+
+Automated training requires `FEATURE_BUILD_ENABLED=true`, at least ten accepted
+training examples, and at least one validation example. It submits training but
+does not deploy the completed model.

@@ -96,6 +96,26 @@ records what would be trained but deliberately does not train a model. Set
 container using `DefaultAzureCredential`. `INITIAL_BATCH_SIZE` controls the
 Cosmos SDK page size.
 
+With the supplied configuration, initial classification artifacts are written
+before Feature Build under `output/csv/`, Foundry datasets under
+`output/features/`, and the placeholder training log under `output/logs/`.
+
+Set `FEATURE_BUILD_ENABLED=true` to create Microsoft Foundry chat-format
+`foundry_train.jsonl`, `foundry_validation.jsonl`, and `foundry_test.jsonl`
+files plus a rejection/count report. The deterministic split is performed by
+CID to prevent conversation leakage. Feature build can mask common PII, remove
+duplicates, exclude rows requiring review, and optionally require explicit
+human approval. It prepares files only; it does not upload them to Foundry or
+start a fine-tuning job. When Blob/ADLS upload is enabled, these files are
+included with the other initial-load artifacts.
+
+Set `FOUNDRY_TRAINING_ENABLED=true` to upload the generated train and validation
+files and submit a supervised fine-tuning job through the configured Foundry
+project. Submission is disabled by default because it creates a paid Azure job.
+The job and file IDs are saved under `output/logs/foundry_training_job.json`.
+The application does not deploy the resulting model; deployment remains a
+separate approval-controlled operation.
+
 Configure the Cosmos source and output in `intent_app_config.env`, then classify
 only documents inserted or last updated from Friday evening through the time the
 command starts:

@@ -32,7 +32,7 @@ flowchart LR
         direction LR
         I_COSMOS["Cosmos DB<br/>Historical NORA records"] --> I_EXTRACT["Bulk extract<br/>Extract fields and classify intent"]
         I_EXTRACT --> I_ADLS["ADLS / Blob<br/>Raw and classified artifacts"]
-        I_ADLS -.-> I_FEATURES["Feature build<br/>Clean, label, split"]
+        I_ADLS --> I_FEATURES["Feature build<br/>Clean, label, split"]
         I_FEATURES -.-> I_MODEL["Model<br/>Training-ready assets"]
     end
 
@@ -50,9 +50,9 @@ flowchart LR
     classDef implemented fill:#3698ba,color:#fff,stroke:#247c99;
     classDef optional fill:#3698ba,color:#fff,stroke:#247c99,stroke-dasharray:5 3;
     classDef planned fill:#11851a,color:#fff,stroke:#096810,stroke-dasharray:6 4;
-    class I_COSMOS,I_EXTRACT,L_COSMOS,L_FEED,L_FUNCTION,L_HUB implemented;
-    class I_ADLS optional;
-    class I_FEATURES,I_MODEL,L_INTENT,L_KG,L_POLICY,L_API planned;
+    class I_COSMOS,I_EXTRACT,I_FEATURES,L_COSMOS,L_FEED,L_FUNCTION,L_HUB implemented;
+    class I_ADLS,I_MODEL optional;
+    class L_INTENT,L_KG,L_POLICY,L_API planned;
 ```
 
 ### Configuration-driven execution
@@ -64,8 +64,12 @@ the blocking Azure Functions host starts.
 
 The initial flow reads all source records or an inclusive `_ts` timeframe,
 classifies them, writes local CSV/JSONL artifacts, and optionally uploads those
-artifacts to Blob Storage or ADLS Gen2. The current training manifest and log are
-explicit placeholders; feature engineering and model training are not executed.
+artifacts to Blob Storage or ADLS Gen2. The optional Feature Build produces
+Microsoft Foundry-compatible train, validation, and test JSONL files. It uses a
+deterministic CID-level split, optional PII masking, deduplication, and review
+filters. The training manifest remains informational: model training itself is
+only submitted when the explicit `FOUNDRY_TRAINING_ENABLED` flag is true. The
+submission stores a local job receipt but deliberately does not deploy the model.
 
 The live flow uses Cosmos lease containers for checkpoints. Four change-feed
 triggers publish compact identifier-only events to Event Hubs. The Event Hubs
@@ -95,7 +99,7 @@ Files are append-only, so rerunning an ID or dataset creates duplicate rows. Thi
 
 - Connect the Event Hubs subscriber to live intent classification and decomposition.
 - Add a durable initial-load watermark and deduplication across the batch/stream boundary.
-- Implement feature engineering and model training from the ADLS/Blob corpus.
+- Add richer feature engineering and model training from the ADLS/Blob corpus.
 - Add knowledge-graph, policy-gate, and NORA API adapters.
 - Add schema validation before export.
 - Add a redaction layer before LLM output.
