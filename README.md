@@ -82,6 +82,15 @@ The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
 ## Intent classification timeframe export
 
+Authentication is checked before workers start or existing classification files
+are replaced. `INTENT_AUTH_MODE=default` keeps the Azure credential chain;
+`azure_cli` selects the identity from `az login`. `INTENT_AUTH_TIMEOUT_SECONDS=60`
+sets the credential subprocess timeout. A shared, locked in-memory token cache
+prevents workers from simultaneously invoking the CLI for the same scope and
+refreshes tokens five minutes before expiry. Tokens are never written to logs or
+disk. CLI installation, login, and network problems still require correction in
+the environment; the application reports authentication failure before reading data.
+
 Runs print timestamped progress immediately and save it to
 `output/logs/intent_pipeline.log` (`INTENT_LOG_OUTPUT`). Each CID query and
 interaction source is reported, and pending stages emit a heartbeat every 15

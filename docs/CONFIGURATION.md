@@ -26,6 +26,8 @@ Do not place client secrets, access tokens, or Cosmos account keys in `.env`. `D
 | Variable | Default | Description |
 |---|---|---|
 | `CSV_OUTPUT_DIR` | `output/csv` | Classified, count, missing-record, and manifest CSV directory |
+| `INTENT_AUTH_MODE` | `default` | Azure default credential chain, or azure_cli to use az login explicitly |
+| `INTENT_AUTH_TIMEOUT_SECONDS` | `60` | Credential subprocess timeout in seconds; must be positive |
 | `INTENT_CIDS_FROM_CSV` | `false` | Restrict initial Cosmos reads and audits to CIDs from a CSV |
 | `INTENT_CID_CSV` | `input/cids.csv` | Input CSV containing selected CIDs |
 | `INTENT_CID_COLUMN` | `cid` | CID column header in the input file |

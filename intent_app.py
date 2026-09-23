@@ -40,6 +40,7 @@ from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 from interaction_reader import get_interaction as read_interaction
 from pipeline_logging import LOGGER, configure_logging, progress
+from pipeline_auth import create_pipeline_credential, check_cosmos_authentication
 
 
 TICKET_ID_RE = re.compile(
@@ -1495,10 +1496,16 @@ def run_initial_load(args: argparse.Namespace) -> None:
         *( [clarification_path.resolve()] if clarification_path else []),
     }:
         raise ValueError("CID input file must differ from output paths")
-    incremental = IncrementalOutput(output_path, clarification_path)
     LOGGER.info("Classification output directory: %s", output_path.parent.resolve())
     with progress("Azure credential initialization"):
-        credential = DefaultAzureCredential()
+        credential = create_pipeline_credential()
+    try:
+        with progress("Cosmos token check before starting workers"):
+            check_cosmos_authentication(credential)
+    except BaseException:
+        credential.close()
+        raise
+    incremental = IncrementalOutput(output_path, clarification_path)
     with progress("Cosmos client initialization and authentication"):
         client = CosmosClient(endpoint, credential=credential)
     database = client.get_database_client(database_name)
