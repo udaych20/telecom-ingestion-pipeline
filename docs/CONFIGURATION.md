@@ -26,6 +26,9 @@ Do not place client secrets, access tokens, or Cosmos account keys in `.env`. `D
 | Variable | Default | Description |
 |---|---|---|
 | `CSV_OUTPUT_DIR` | `output/csv` | Classified, count, missing-record, and manifest CSV directory |
+| `INTENT_CIDS_FROM_CSV` | `false` | Restrict initial Cosmos reads and audits to CIDs from a CSV |
+| `INTENT_CID_CSV` | `input/cids.csv` | Input CSV containing selected CIDs |
+| `INTENT_CID_COLUMN` | `cid` | CID column header in the input file |
 | `INTENT_INCLUDE_INTERACTIONS` | `false` | Attach CID-linked chat, agent/context, tool history, and feedback using the shared app.py joins |
 | `INTENT_SEPARATE_CLARIFICATION` | `false` | Write clarification_needed to a separate CSV; other intents stay in the main CSV |
 | `INTENT_CLARIFICATION_OUTPUT` | `intent_clarification_needed.csv` | Separate clarification filename in CSV_OUTPUT_DIR |

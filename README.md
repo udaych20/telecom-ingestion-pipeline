@@ -82,6 +82,20 @@ The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
 ## Intent classification timeframe export
 
+To select CIDs from a file, set `INTENT_CIDS_FROM_CSV=true`,
+`INTENT_CID_CSV=input/cids.csv`, and `INTENT_CID_COLUMN=cid`. The CSV must have a
+header, for example `cid`, followed by one CID per row. Blank CIDs are skipped,
+duplicates are removed, and leading zeros are preserved. Missing files, missing
+columns, and empty CID lists fail before connecting to Cosmos.
+
+Cosmos still supplies the actual records. Timeframe and record-limit settings
+still apply; the missing-record audit uses the same CID selection. If interaction
+export is enabled, histories are joined for the selected classified CIDs. With
+the flag false, the existing Cosmos discovery flow is unchanged. A document with
+multiple CIDs follows the classifier's existing first-CID precedence, and a CID
+without a matching source record produces no classified row. The flag affects
+initial loads only, not the continuous change-feed triggers.
+
 Set `INTENT_INCLUDE_INTERACTIONS=true` in `intent_app_config.env` to include
 agent/context and tool-call source records in each classified row. The shared
 `interaction_reader.py` uses the same joins as `app.py`: chat by message CID,

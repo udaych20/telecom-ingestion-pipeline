@@ -477,6 +477,58 @@ def label_records(
     return labels
 
 
+def load_cids_from_csv(path: Path, column: str = "cid") -> list[str]:
+    """Read unique CID strings, preserving leading zeros and CSV order."""
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        if not reader.fieldnames or column not in reader.fieldnames:
+            raise ValueError(f"CID CSV must contain the column {column!r}: {path}")
+        cids = list(dict.fromkeys(
+            str(row.get(column) or "").strip()
+            for row in reader if str(row.get(column) or "").strip()
+        ))
+    if not cids:
+        raise ValueError(f"CID CSV contains no nonempty CIDs: {path}")
+    return cids
+
+
+def iter_records_for_cids(container, cids, start_time, end_time, batch_size):
+    """Query requested CIDs using the shapes supported by conversation_id."""
+    matches = [f"c.{field} = @cid" for field in CONVERSATION_ID_FIELDS]
+    matches += [f"c.conversation.{field} = @cid" for field in CONVERSATION_ID_FIELDS]
+    for source in ("c", "c.conversation"):
+        for field in ("messages", "history"):
+            matches.append(
+                f"EXISTS (SELECT VALUE m FROM m IN {source}.{field} "
+                "WHERE m.cid = @cid OR m.data.cid = @cid)"
+            )
+    # conversation_id also uses the document id when no explicit CID exists.
+    matches.append("c.id = @cid")
+    filters = ["(" + " OR ".join(matches) + ")"]
+    bounds = []
+    for name, value, operator in (("start", start_time, ">="), ("end", end_time, "<=")):
+        if value is not None:
+            filters.append(f"c._ts {operator} @{name}")
+            bounds.append({"name": f"@{name}", "value": int(value.timestamp())})
+    seen = set()
+    for cid in cids:
+        options = dict(
+            query="SELECT * FROM c WHERE " + " AND ".join(filters) + " ORDER BY c._ts DESC",
+            parameters=[{"name": "@cid", "value": cid}, *bounds],
+            enable_cross_partition_query=True,
+        )
+        if batch_size is not None:
+            options["max_item_count"] = batch_size
+        for record in container.query_items(**options):
+            # Match the classifier's CID precedence for documents with multiple IDs.
+            if conversation_id(record) != cid:
+                continue
+            key = cosmos_record_key(record)
+            if key not in seen:
+                seen.add(key)
+                yield record
+
+
 def load_cosmos_records(
     container: Any,
     max_records: int | None,
@@ -484,6 +536,7 @@ def load_cosmos_records(
     start_time: datetime | None = None,
     end_time: datetime | None = None,
     batch_size: int | None = None,
+    cids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Read source records from Cosmos."""
     if workers != 1:
@@ -493,7 +546,7 @@ def load_cosmos_records(
         )
 
     records: list[dict[str, Any]] = []
-    for item in iter_cosmos_records(container, start_time, end_time, batch_size):
+    for item in iter_cosmos_records(container, start_time, end_time, batch_size, cids):
         records.append(item)
         if max_records is not None and len(records) >= max_records:
             break
@@ -505,8 +558,11 @@ def iter_cosmos_records(
     start_time: datetime | None = None,
     end_time: datetime | None = None,
     batch_size: int | None = None,
+    cids: list[str] | None = None,
 ) -> Iterable[dict[str, Any]]:
     """Read all records or query an inclusive Cosmos `_ts` window."""
+    if cids is not None:
+        return iter_records_for_cids(container, cids, start_time, end_time, batch_size)
     if start_time is None and end_time is None:
         if batch_size is None:
             return container.read_all_items()
@@ -551,13 +607,16 @@ def find_missing_cosmos_records(
     exported_records: Iterable[dict[str, Any]],
     start_time: datetime | None = None,
     end_time: datetime | None = None,
+    cids: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Repeat the same Cosmos scope and return records absent from the first read."""
     exported_keys = {cosmos_record_key(record) for record in exported_records}
     missing: list[dict[str, Any]] = []
     inventory_count = 0
 
-    if start_time is None and end_time is None:
+    if cids is not None:
+        items = iter_cosmos_records(container, start_time, end_time, cids=cids)
+    elif start_time is None and end_time is None:
         items = container.query_items(
             query="SELECT * FROM c",
             enable_cross_partition_query=True,
@@ -1212,6 +1271,13 @@ def run_initial_load(args: argparse.Namespace) -> None:
         if start_time > end_time:
             raise ValueError("INITIAL_START_TIME must be earlier than INITIAL_END_TIME")
 
+    cids = None
+    if env_bool("INTENT_CIDS_FROM_CSV", False):
+        cids = load_cids_from_csv(
+            Path(required_env("INTENT_CID_CSV")),
+            os.getenv("INTENT_CID_COLUMN", "cid"),
+        )
+        print(f"Selected {len(cids)} unique CIDs from CSV")
     credential = DefaultAzureCredential()
     client = CosmosClient(endpoint, credential=credential)
     database = client.get_database_client(database_name)
@@ -1229,6 +1295,7 @@ def run_initial_load(args: argparse.Namespace) -> None:
         start_time,
         end_time,
         batch_size,
+        cids,
     )
     labels = label_records(records, include_source_fields=include_source_fields)
     include_interactions = env_bool("INTENT_INCLUDE_INTERACTIONS", False)
@@ -1258,6 +1325,7 @@ def run_initial_load(args: argparse.Namespace) -> None:
             records,
             start_time,
             end_time,
+            cids,
         )
         combined_labels = label_records(
             [*records, *missing_records],
