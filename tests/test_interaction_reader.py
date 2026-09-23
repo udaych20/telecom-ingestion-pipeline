@@ -1,12 +1,43 @@
 import json
+import csv
+import tempfile
+from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
 from interaction_reader import get_interaction
-from intent_app import attach_interactions
+from intent_app import attach_interactions, write_interaction_output
 
 
 class InteractionTests(unittest.TestCase):
+    @patch("intent_app.attach_interactions")
+    def test_csv_is_flushed_before_next_cid_and_survives_failure(self, attach):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "main.csv"
+            clarification = Path(directory) / "clarification.csv"
+            labels = [
+                {"conversation_id": "one", "classification.intent": "query"},
+                {"conversation_id": "one", "classification.intent": "clarification_needed"},
+                {"conversation_id": "two", "classification.intent": "query"},
+            ]
+            def read(path):
+                with path.open(encoding="utf-8-sig", newline="") as file:
+                    return list(csv.DictReader(file))
+            def fetch(database, group):
+                if group[0]["conversation_id"] == "two":
+                    self.assertEqual(read(output)[0]["conversation_id"], "one")
+                    self.assertEqual(read(clarification)[0]["conversation_id"], "one")
+                    raise RuntimeError("next CID failed")
+                for label in group:
+                    label["interaction.tool_history"] = '[{"tool":"lookup"}]'
+            attach.side_effect = fetch
+            with self.assertRaisesRegex(RuntimeError, "next CID failed"):
+                write_interaction_output(Mock(), output, labels, clarification)
+            self.assertEqual(len(read(output)), 1)
+            self.assertEqual(len(read(clarification)), 1)
+            self.assertEqual(json.loads(read(output)[0]["interaction.tool_history"]),
+                             [{"tool": "lookup"}])
+
     def test_reader_follows_app_cid_run_id_join(self):
         records = {
             "chat": [{"id": "chat-1", "messages": []}],

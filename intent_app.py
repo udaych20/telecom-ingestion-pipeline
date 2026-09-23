@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import time
 from collections import Counter, defaultdict
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1233,6 +1234,55 @@ def attach_interactions(database: Any, labels: list[dict[str, Any]]) -> None:
                       for key, value in cache[cid].items()})
 
 
+def write_interaction_output(database, path, labels, clarification_path=None):
+    """Flush completed CID groups before fetching the next interaction."""
+    paths = [path] if clarification_path is None else [path, clarification_path]
+    if path.suffix.lower() not in {".csv", ".jsonl", ".ndjson"}:
+        raise ValueError("INTENT_OUTPUT must end in .csv, .jsonl, or .ndjson")
+    if clarification_path is not None:
+        if any(item.suffix.lower() != ".csv" for item in paths):
+            raise ValueError("Separate clarification output requires two CSV paths")
+        if path.resolve() == clarification_path.resolve():
+            raise ValueError("Clarification output must differ from INTENT_OUTPUT")
+    columns = list(dict.fromkeys(key for label in labels for key in label))
+    columns = list(dict.fromkeys([*columns, "interaction.run_ids",
+        "interaction.chat_history", "interaction.context_history",
+        "interaction.tool_history", "interaction.feedback"]))
+    grouped = defaultdict(list)
+    for label in labels:
+        grouped[label.get("conversation_id")].append(label)
+    with ExitStack() as stack:
+        files, writers = [], []
+        for target in paths:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            file = stack.enter_context(target.open(
+                "w", encoding="utf-8-sig" if target.suffix.lower() == ".csv" else "utf-8",
+                newline="",
+            ))
+            files.append(file)
+            writer = csv.DictWriter(file, fieldnames=columns) if target.suffix.lower() == ".csv" else None
+            writers.append(writer)
+            if writer is not None:
+                writer.writeheader()
+            file.flush()
+            LOGGER.info("Opened incremental output: %s", target.resolve())
+        saved = 0
+        for index, group in enumerate(grouped.values(), start=1):
+            attach_interactions(database, group)
+            for label in group:
+                destination = int(clarification_path is not None and
+                                  label.get("classification.intent") == "clarification_needed")
+                if writers[destination] is not None:
+                    writers[destination].writerow(label)
+                else:
+                    files[destination].write(json.dumps(label, ensure_ascii=False) + "\n")
+            for file in files:
+                file.flush()
+            saved += len(group)
+            LOGGER.info("Saved %s rows; interactions completed %s/%s", saved, index, len(grouped))
+    return paths
+
+
 def run_initial_load(args: argparse.Namespace) -> None:
     """Run the configured historical extraction and classification once."""
 
@@ -1305,8 +1355,6 @@ def run_initial_load(args: argparse.Namespace) -> None:
     with progress(f"intent classification of {len(records)} records"):
         labels = label_records(records, include_source_fields=include_source_fields)
     include_interactions = env_bool("INTENT_INCLUDE_INTERACTIONS", False)
-    if include_interactions:
-        attach_interactions(database, labels)
     clarification_path = None
     if env_bool("INTENT_SEPARATE_CLARIFICATION", False):
         clarification_path = configured_output_path(
@@ -1317,7 +1365,10 @@ def run_initial_load(args: argparse.Namespace) -> None:
         }:
             raise ValueError("Clarification output must differ from count and missing outputs")
     with progress("writing classification and count outputs"):
-        classification_paths = write_classification_output(output_path, labels, clarification_path)
+        if include_interactions:
+            classification_paths = write_interaction_output(database, output_path, labels, clarification_path)
+        else:
+            classification_paths = write_classification_output(output_path, labels, clarification_path)
         write_intent_count_csv(count_output_path, labels)
 
     missing_records: list[dict[str, Any]] = []
@@ -1357,8 +1408,9 @@ def run_initial_load(args: argparse.Namespace) -> None:
                 for label in missing_labels
             ]
         if include_interactions:
-            attach_interactions(database, missing_labels)
-        write_csv(missing_output_path, missing_labels)
+            write_interaction_output(database, missing_output_path, missing_labels)
+        else:
+            write_csv(missing_output_path, missing_labels)
 
     if write_back:
         target = database.get_container_client(target_container_name)

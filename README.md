@@ -88,7 +88,11 @@ interaction source is reported, and pending stages emit a heartbeat every 15
 seconds. `INTENT_LOG_LEVEL=INFO` enables these messages by default. Logs omit CID
 values and document payloads. The classification output directory is created
 before connecting to Cosmos; classification files are still written after
-retrieval and enrichment complete. A heartbeat means the stage is waiting, not
+source retrieval completes. With interaction export enabled, output headers are
+created before enrichment, and rows are flushed after each completed CID. A failed
+later CID leaves previously written rows available. Re-running replaces the
+output files; this is not a resumable checkpoint. Source retrieval and classification
+still use in-memory lists. A heartbeat means the stage is waiting, not
 that the server has confirmed progress.
 
 To select CIDs from a file, set `INTENT_CIDS_FROM_CSV=true`,
