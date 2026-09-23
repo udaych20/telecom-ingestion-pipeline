@@ -35,6 +35,7 @@ from typing import Any, Iterable
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 from interaction_reader import get_interaction as read_interaction
+from pipeline_logging import LOGGER, configure_logging, progress
 
 
 TICKET_ID_RE = re.compile(
@@ -511,7 +512,8 @@ def iter_records_for_cids(container, cids, start_time, end_time, batch_size):
             filters.append(f"c._ts {operator} @{name}")
             bounds.append({"name": f"@{name}", "value": int(value.timestamp())})
     seen = set()
-    for cid in cids:
+    for index, cid in enumerate(cids, start=1):
+        LOGGER.info("CID query %s/%s starting", index, len(cids))
         options = dict(
             query="SELECT * FROM c WHERE " + " AND ".join(filters) + " ORDER BY c._ts DESC",
             parameters=[{"name": "@cid", "value": cid}, *bounds],
@@ -527,6 +529,7 @@ def iter_records_for_cids(container, cids, start_time, end_time, batch_size):
             if key not in seen:
                 seen.add(key)
                 yield record
+        LOGGER.info("CID query %s/%s completed; %s unique records fetched", index, len(cids), len(seen))
 
 
 def load_cosmos_records(
@@ -548,6 +551,8 @@ def load_cosmos_records(
     records: list[dict[str, Any]] = []
     for item in iter_cosmos_records(container, start_time, end_time, batch_size, cids):
         records.append(item)
+        if len(records) == 1 or len(records) % 100 == 0:
+            LOGGER.info("Source records fetched: %s", len(records))
         if max_records is not None and len(records) >= max_records:
             break
     return records
@@ -1214,7 +1219,8 @@ def attach_interactions(database: Any, labels: list[dict[str, Any]]) -> None:
         if not cid:
             raise ValueError("Interaction export requires a conversation_id")
         if cid not in cache:
-            history = read_interaction(database, cid, **containers)
+            with progress(f"interaction {len(cache) + 1}"):
+                history = read_interaction(database, cid, **containers)
             cache[cid] = {
                 "interaction.run_ids": history["run_ids"],
                 "interaction.chat_history": history["chat_history"],
@@ -1278,8 +1284,12 @@ def run_initial_load(args: argparse.Namespace) -> None:
             os.getenv("INTENT_CID_COLUMN", "cid"),
         )
         print(f"Selected {len(cids)} unique CIDs from CSV")
-    credential = DefaultAzureCredential()
-    client = CosmosClient(endpoint, credential=credential)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    LOGGER.info("Classification output directory: %s", output_path.parent.resolve())
+    with progress("Azure credential initialization"):
+        credential = DefaultAzureCredential()
+    with progress("Cosmos client initialization and authentication"):
+        client = CosmosClient(endpoint, credential=credential)
     database = client.get_database_client(database_name)
     source_container = database.get_container_client(container_name)
 
@@ -1288,16 +1298,12 @@ def run_initial_load(args: argparse.Namespace) -> None:
             "Filtering Cosmos documents by _ts (UTC, inclusive): "
             f"{start_time.isoformat()} through {end_time.isoformat()}"
         )
-    records = load_cosmos_records(
-        source_container,
-        max_records,
-        workers,
-        start_time,
-        end_time,
-        batch_size,
-        cids,
-    )
-    labels = label_records(records, include_source_fields=include_source_fields)
+    with progress("Cosmos source retrieval (including lazy authentication)"):
+        records = load_cosmos_records(
+            source_container, max_records, workers, start_time, end_time, batch_size, cids,
+        )
+    with progress(f"intent classification of {len(records)} records"):
+        labels = label_records(records, include_source_fields=include_source_fields)
     include_interactions = env_bool("INTENT_INCLUDE_INTERACTIONS", False)
     if include_interactions:
         attach_interactions(database, labels)
@@ -1310,8 +1316,9 @@ def run_initial_load(args: argparse.Namespace) -> None:
             count_output_path.resolve(), missing_output_path.resolve()
         }:
             raise ValueError("Clarification output must differ from count and missing outputs")
-    classification_paths = write_classification_output(output_path, labels, clarification_path)
-    write_intent_count_csv(count_output_path, labels)
+    with progress("writing classification and count outputs"):
+        classification_paths = write_classification_output(output_path, labels, clarification_path)
+        write_intent_count_csv(count_output_path, labels)
 
     missing_records: list[dict[str, Any]] = []
     inventory_count: int | None = None
@@ -1320,13 +1327,10 @@ def run_initial_load(args: argparse.Namespace) -> None:
             raise ValueError(
                 "INTENT_FIND_MISSING requires INTENT_MAX_RECORDS to be empty"
             )
-        missing_records, inventory_count = find_missing_cosmos_records(
-            source_container,
-            records,
-            start_time,
-            end_time,
-            cids,
-        )
+        with progress("second Cosmos inventory pass"):
+            missing_records, inventory_count = find_missing_cosmos_records(
+                source_container, records, start_time, end_time, cids,
+            )
         combined_labels = label_records(
             [*records, *missing_records],
             # Keep _rid during the comparison even when the main export hides
@@ -1358,7 +1362,8 @@ def run_initial_load(args: argparse.Namespace) -> None:
 
     if write_back:
         target = database.get_container_client(target_container_name)
-        write_labels_to_container(target, labels)
+        with progress("Cosmos label write-back"):
+            write_labels_to_container(target, labels)
 
     artifact_paths = [*classification_paths, count_output_path]
     if env_bool("TRAINING_PLACEHOLDER_ENABLED", True):
@@ -1374,19 +1379,22 @@ def run_initial_load(args: argparse.Namespace) -> None:
     foundry_counts: dict[str, int] | None = None
     foundry_receipt: dict[str, Any] | None = None
     if env_bool("FEATURE_BUILD_ENABLED", False):
-        foundry_paths, foundry_counts = create_foundry_artifacts(labels)
+        with progress("Foundry dataset generation"):
+            foundry_paths, foundry_counts = create_foundry_artifacts(labels)
         artifact_paths.extend(foundry_paths.values())
         if env_bool("FOUNDRY_TRAINING_ENABLED", False):
-            receipt_path, foundry_receipt = start_foundry_training(
-                foundry_paths, foundry_counts
-            )
+            with progress("Foundry file upload and training submission"):
+                receipt_path, foundry_receipt = start_foundry_training(
+                    foundry_paths, foundry_counts
+                )
             artifact_paths.append(receipt_path)
     elif env_bool("FOUNDRY_TRAINING_ENABLED", False):
         raise ValueError("FOUNDRY_TRAINING_ENABLED requires FEATURE_BUILD_ENABLED=true")
 
     uploaded: list[str] = []
     if env_bool("ADLS_UPLOAD_ENABLED", False):
-        uploaded = upload_files_to_blob(artifact_paths, credential)
+        with progress("Blob artifact upload"):
+            uploaded = upload_files_to_blob(artifact_paths, credential)
 
     counts = Counter(label["classification.intent"] for label in labels)
     review_count = sum(
@@ -1446,6 +1454,10 @@ def run_stream_host() -> None:
 def main() -> None:
     args = parse_args()
     load_env_file(Path(args.config))
+    log_path = configured_output_path("INTENT_LOG_OUTPUT", "intent_pipeline.log", "LOG_OUTPUT_DIR")
+    configure_logging(log_path, os.getenv("INTENT_LOG_LEVEL", "INFO"))
+    LOGGER.info("Configuration: %s", Path(args.config).resolve())
+    LOGGER.info("Progress log: %s", log_path.resolve())
     initial_enabled = env_bool("INITIAL_LOAD_ENABLED", True)
     stream_enabled = env_bool("STREAM_LOAD_ENABLED", False)
     if not initial_enabled and not stream_enabled:

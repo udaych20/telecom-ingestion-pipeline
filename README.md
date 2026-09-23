@@ -82,6 +82,15 @@ The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
 ## Intent classification timeframe export
 
+Runs print timestamped progress immediately and save it to
+`output/logs/intent_pipeline.log` (`INTENT_LOG_OUTPUT`). Each CID query and
+interaction source is reported, and pending stages emit a heartbeat every 15
+seconds. `INTENT_LOG_LEVEL=INFO` enables these messages by default. Logs omit CID
+values and document payloads. The classification output directory is created
+before connecting to Cosmos; classification files are still written after
+retrieval and enrichment complete. A heartbeat means the stage is waiting, not
+that the server has confirmed progress.
+
 To select CIDs from a file, set `INTENT_CIDS_FROM_CSV=true`,
 `INTENT_CID_CSV=input/cids.csv`, and `INTENT_CID_COLUMN=cid`. The CSV must have a
 header, for example `cid`, followed by one CID per row. Blank CIDs are skipped,

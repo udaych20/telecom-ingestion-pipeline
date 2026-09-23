@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime, timezone
+from pipeline_logging import LOGGER, progress
 
 
 def query(container, field, values):
@@ -75,15 +76,21 @@ def get_interaction(
     context = database.get_container_client(context_container)
     feedback_source = database.get_container_client(feedback_container)
 
-    chats = query_chat(chat, cid)
+    with progress("interaction chat query"):
+        chats = query_chat(chat, cid)
     if not chats:
         raise ValueError(f"Chat not found for cid: {cid}")
 
-    context_history = query(context, "run_id", [cid])
+    with progress("interaction context query"):
+        context_history = query(context, "run_id", [cid])
     run_ids = find_values(context_history, "run_id")
-    tool_history = query(tools, "run_id", run_ids) if run_ids else []
+    with progress("interaction tool queries"):
+        tool_history = query(tools, "run_id", run_ids) if run_ids else []
 
-    feedback = query_feedback(feedback_source, [cid])
+    with progress("interaction feedback query"):
+        feedback = query_feedback(feedback_source, [cid])
+    LOGGER.info("Interaction records: chat=%s context=%s tools=%s feedback=%s",
+                len(chats), len(context_history), len(tool_history), len(feedback))
 
     return {
         "interaction_id": cid,
