@@ -34,6 +34,7 @@ from typing import Any, Iterable
 
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
+from interaction_reader import get_interaction as read_interaction
 
 
 TICKET_ID_RE = re.compile(
@@ -1140,6 +1141,33 @@ def upload_files_to_blob(paths: Iterable[Path], credential: Any) -> list[str]:
     return uploaded
 
 
+def attach_interactions(database: Any, labels: list[dict[str, Any]]) -> None:
+    """Attach each CID's source history once, without changing its intent label."""
+    cache: dict[str, dict[str, Any]] = {}
+    containers = {
+        "chat_container": os.getenv("COSMOS_CHAT_CONTAINER", "chat-history-uat"),
+        "tools_container": os.getenv("COSMOS_TOOLS_CONTAINER", "context-history-all-tools"),
+        "context_container": os.getenv("COSMOS_CONTEXT_CONTAINER", "context-history-uat"),
+        "feedback_container": os.getenv("COSMOS_FEEDBACK_CONTAINER", "chat-feedback"),
+    }
+    for label in labels:
+        cid = str(label.get("conversation_id") or "").strip()
+        if not cid:
+            raise ValueError("Interaction export requires a conversation_id")
+        if cid not in cache:
+            history = read_interaction(database, cid, **containers)
+            cache[cid] = {
+                "interaction.run_ids": history["run_ids"],
+                "interaction.chat_history": history["chat_history"],
+                "interaction.context_history": history["context_history"],
+                "interaction.tool_history": history["tool_history"],
+                "interaction.feedback": history["feedback"],
+            }
+        # Serialize arrays as JSON cells for CSV and retain source field names.
+        label.update({key: json.dumps(value, ensure_ascii=False, default=str)
+                      for key, value in cache[cid].items()})
+
+
 def run_initial_load(args: argparse.Namespace) -> None:
     """Run the configured historical extraction and classification once."""
 
@@ -1203,6 +1231,9 @@ def run_initial_load(args: argparse.Namespace) -> None:
         batch_size,
     )
     labels = label_records(records, include_source_fields=include_source_fields)
+    include_interactions = env_bool("INTENT_INCLUDE_INTERACTIONS", False)
+    if include_interactions:
+        attach_interactions(database, labels)
     clarification_path = None
     if env_bool("INTENT_SEPARATE_CLARIFICATION", False):
         clarification_path = configured_output_path(
@@ -1253,6 +1284,8 @@ def run_initial_load(args: argparse.Namespace) -> None:
                 }
                 for label in missing_labels
             ]
+        if include_interactions:
+            attach_interactions(database, missing_labels)
         write_csv(missing_output_path, missing_labels)
 
     if write_back:

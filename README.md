@@ -82,6 +82,23 @@ The Azure identity needs the **Cosmos DB Built-in Data Reader** data-plane role.
 
 ## Intent classification timeframe export
 
+Set `INTENT_INCLUDE_INTERACTIONS=true` in `intent_app_config.env` to include
+agent/context and tool-call source records in each classified row. The shared
+`interaction_reader.py` uses the same joins as `app.py`: chat by message CID,
+context by `run_id = CID`, tools by context run IDs, and feedback by CID list.
+Configure the four `COSMOS_*_CONTAINER` settings for your source containers.
+
+The new columns are `interaction.run_ids`, `interaction.chat_history`,
+`interaction.context_history`, `interaction.tool_history`, and
+`interaction.feedback`. Each contains JSON text preserving the original records,
+including agent/tool payloads when present. No agent or tool schema is inferred.
+Repeated CIDs share a lookup within each export pass. Missing chat or query
+errors stop the export; absent context/tools/feedback are represented by empty
+arrays. Linked histories are fetched in full, even when the initial classification
+read uses a timeframe. This flag applies to both the normal and clarification CSVs
+and to missing-record exports. Feature Build still trains on user text and intent
+only, without these additional source payloads.
+
 To separate clarification records, set `INTENT_SEPARATE_CLARIFICATION=true`.
 The main classification CSV then contains all other intents, and
 `INTENT_CLARIFICATION_OUTPUT` (default `intent_clarification_needed.csv`) contains
