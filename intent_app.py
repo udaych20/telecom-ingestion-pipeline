@@ -26,8 +26,11 @@ import re
 import shutil
 import subprocess
 import time
+import tempfile
 from collections import Counter, defaultdict
 from contextlib import ExitStack
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from itertools import islice
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1234,8 +1237,46 @@ def attach_interactions(database: Any, labels: list[dict[str, Any]]) -> None:
                       for key, value in cache[cid].items()})
 
 
-def write_interaction_output(database, path, labels, clarification_path=None):
+def fetch_interaction_rows(database, group):
+    """Keep large interaction payloads out of the retained classification rows."""
+    rows = [dict(label) for label in group]
+    attach_interactions(database, rows)
+    return rows
+
+
+def iter_interaction_batches(database, grouped, batch_size, workers):
+    """Submit only one bounded batch and yield results as workers finish."""
+    groups = iter(grouped.values())
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        batch_number = 0
+        while batch := list(islice(groups, batch_size)):
+            batch_number += 1
+            LOGGER.info("Interaction batch %s: %s CIDs, %s workers", batch_number, len(batch), workers)
+            pending = {executor.submit(fetch_interaction_rows, database, group) for group in batch}
+            failures = []
+            for future in as_completed(pending):
+                pending.remove(future)
+                try:
+                    yield future.result()
+                except Exception as error:
+                    failures.append(error)
+                    LOGGER.error("Interaction batch %s: CID failed (%s)", batch_number, type(error).__name__)
+                finally:
+                    del future
+            if failures:
+                raise RuntimeError(
+                    f"Interaction batch {batch_number}: {len(failures)} CID(s) failed; "
+                    "successful rows were saved. Stopping before the next batch."
+                ) from failures[0]
+
+
+def write_interaction_output(database, path, labels, clarification_path=None,
+                             *, batch_size=None, workers=None, write_back=False):
     """Flush completed CID groups before fetching the next interaction."""
+    batch_size = batch_size if batch_size is not None else env_int("INTERACTION_BATCH_SIZE") or 100
+    workers = workers if workers is not None else env_int("INTERACTION_MAX_WORKERS") or 10
+    if batch_size < 1 or workers < 1:
+        raise ValueError("Interaction batch size and workers must be positive")
     paths = [path] if clarification_path is None else [path, clarification_path]
     if path.suffix.lower() not in {".csv", ".jsonl", ".ndjson"}:
         raise ValueError("INTENT_OUTPUT must end in .csv, .jsonl, or .ndjson")
@@ -1267,8 +1308,7 @@ def write_interaction_output(database, path, labels, clarification_path=None):
             file.flush()
             LOGGER.info("Opened incremental output: %s", target.resolve())
         saved = 0
-        for index, group in enumerate(grouped.values(), start=1):
-            attach_interactions(database, group)
+        for index, group in enumerate(iter_interaction_batches(database, grouped, batch_size, workers), start=1):
             for label in group:
                 destination = int(clarification_path is not None and
                                   label.get("classification.intent") == "clarification_needed")
@@ -1280,7 +1320,112 @@ def write_interaction_output(database, path, labels, clarification_path=None):
                 file.flush()
             saved += len(group)
             LOGGER.info("Saved %s rows; interactions completed %s/%s", saved, index, len(grouped))
+            if write_back:
+                target = database.get_container_client(os.getenv("INTENT_TARGET_CONTAINER", "intent-labels"))
+                write_labels_to_container(target, group)
+            del group
     return paths
+
+
+class IncrementalOutput:
+    """Append rows immediately, widening CSV headers on disk when needed."""
+
+    def __init__(self, path, clarification_path=None):
+        self.paths = [path] if clarification_path is None else [path, clarification_path]
+        if any(p.suffix.lower() not in {".csv", ".jsonl", ".ndjson"} for p in self.paths):
+            raise ValueError("Output must be CSV or JSONL")
+        if clarification_path is not None and (
+            any(p.suffix.lower() != ".csv" for p in self.paths)
+            or path.resolve() == clarification_path.resolve()
+        ):
+            raise ValueError("Clarification output requires two different CSV paths")
+        self.columns = ["source_id", "conversation_id", "classification.intent"]
+        # Interaction JSON cells can exceed csv's default parser field limit.
+        csv.field_size_limit(2**31 - 1)
+        for target in self.paths:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.suffix.lower() == ".csv":
+                write_csv(target, [], self.columns)
+            else:
+                write_jsonl(target, [])
+            LOGGER.info("Created output: %s", target.resolve())
+
+    def append(self, rows):
+        columns = list(dict.fromkeys([*self.columns, *(key for row in rows for key in row)]))
+        if columns != self.columns:
+            for target in self.paths:
+                if target.suffix.lower() != ".csv":
+                    continue
+                # Preserve earlier rows without loading the CSV into memory.
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8-sig", newline="",
+                                                 dir=target.parent, delete=False) as replacement:
+                    temporary = Path(replacement.name)
+                    writer = csv.DictWriter(replacement, fieldnames=columns)
+                    writer.writeheader()
+                    with target.open(encoding="utf-8-sig", newline="") as existing:
+                        writer.writerows(csv.DictReader(existing))
+                temporary.replace(target)
+            self.columns = columns
+        with ExitStack() as stack:
+            files = [stack.enter_context(p.open("a", encoding="utf-8", newline="")) for p in self.paths]
+            for row in rows:
+                index = int(len(files) == 2 and row.get("classification.intent") == "clarification_needed")
+                if self.paths[index].suffix.lower() == ".csv":
+                    csv.DictWriter(files[index], fieldnames=self.columns).writerow(row)
+                else:
+                    files[index].write(json.dumps(row, ensure_ascii=False) + "\n")
+            for file in files:
+                file.flush()
+
+
+def export_selected_cids(database, container, cids, output, *, start_time=None,
+                         end_time=None, page_size=None, max_records=None,
+                         include_source_fields=True, include_interactions=False,
+                         batch_size=100, workers=10, write_back=False):
+    """Finish and persist each selected CID without waiting for the entire list."""
+    if batch_size < 1 or workers < 1:
+        raise ValueError("Batch size and workers must be positive")
+    records, labels = [], []
+    selected = iter(cids)
+
+    def fetch(cid):
+        with progress("selected CID source query"):
+            fetched = load_cosmos_records(container, max_records, start_time=start_time,
+                                          end_time=end_time, batch_size=page_size, cids=[cid])
+        classified = label_records(fetched, include_source_fields=include_source_fields)
+        enriched = fetch_interaction_rows(database, classified) if include_interactions and classified else classified
+        return fetched, classified, enriched
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        batch_number = 0
+        while batch := list(islice(selected, batch_size)):
+            batch_number += 1
+            LOGGER.info("Source batch %s: %s CIDs, %s workers", batch_number, len(batch), workers)
+            pending = {executor.submit(fetch, cid) for cid in batch}
+            failures = []
+            for future in as_completed(pending):
+                pending.remove(future)
+                try:
+                    fetched, classified, enriched = future.result()
+                except Exception as error:
+                    failures.append(error)
+                    continue
+                if max_records is not None:
+                    remaining = max(0, max_records - len(records))
+                    fetched, classified, enriched = fetched[:remaining], classified[:remaining], enriched[:remaining]
+                output.append(enriched)
+                if write_back and enriched:
+                    target = database.get_container_client(os.getenv("INTENT_TARGET_CONTAINER", "intent-labels"))
+                    write_labels_to_container(target, enriched)
+                records.extend(fetched)
+                labels.extend(classified)
+                LOGGER.info("CSV saved: %s classified rows; batch %s", len(labels), batch_number)
+                del enriched, fetched, classified, future
+            if failures:
+                raise RuntimeError(f"Source batch {batch_number} failed for {len(failures)} CIDs; saved rows remain") from failures[0]
+            if max_records is not None and len(records) >= max_records:
+                break
+    return records, labels
 
 
 def run_initial_load(args: argparse.Namespace) -> None:
@@ -1335,6 +1480,22 @@ def run_initial_load(args: argparse.Namespace) -> None:
         )
         print(f"Selected {len(cids)} unique CIDs from CSV")
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    include_interactions = env_bool("INTENT_INCLUDE_INTERACTIONS", False)
+    clarification_path = None
+    if env_bool("INTENT_SEPARATE_CLARIFICATION", False):
+        clarification_path = configured_output_path(
+            "INTENT_CLARIFICATION_OUTPUT", "intent_clarification_needed.csv", "CSV_OUTPUT_DIR"
+        )
+        if clarification_path.resolve() in {count_output_path.resolve(), missing_output_path.resolve()}:
+            raise ValueError("Clarification output must differ from count and missing outputs")
+    if find_missing and max_records is not None:
+        raise ValueError("INTENT_FIND_MISSING requires INTENT_MAX_RECORDS to be empty")
+    if cids is not None and Path(required_env("INTENT_CID_CSV")).resolve() in {
+        output_path.resolve(), count_output_path.resolve(), missing_output_path.resolve(),
+        *( [clarification_path.resolve()] if clarification_path else []),
+    }:
+        raise ValueError("CID input file must differ from output paths")
+    incremental = IncrementalOutput(output_path, clarification_path)
     LOGGER.info("Classification output directory: %s", output_path.parent.resolve())
     with progress("Azure credential initialization"):
         credential = DefaultAzureCredential()
@@ -1348,12 +1509,22 @@ def run_initial_load(args: argparse.Namespace) -> None:
             "Filtering Cosmos documents by _ts (UTC, inclusive): "
             f"{start_time.isoformat()} through {end_time.isoformat()}"
         )
-    with progress("Cosmos source retrieval (including lazy authentication)"):
-        records = load_cosmos_records(
-            source_container, max_records, workers, start_time, end_time, batch_size, cids,
+    if cids is not None:
+        records, labels = export_selected_cids(
+            database, source_container, cids, incremental,
+            start_time=start_time, end_time=end_time, page_size=batch_size,
+            max_records=max_records, include_source_fields=include_source_fields,
+            include_interactions=include_interactions,
+            batch_size=env_int("INTERACTION_BATCH_SIZE") or 100,
+            workers=env_int("INTERACTION_MAX_WORKERS") or 10, write_back=write_back,
         )
-    with progress(f"intent classification of {len(records)} records"):
-        labels = label_records(records, include_source_fields=include_source_fields)
+    else:
+        with progress("Cosmos source retrieval (including lazy authentication)"):
+            records = load_cosmos_records(
+                source_container, max_records, workers, start_time, end_time, batch_size, cids,
+            )
+        with progress(f"intent classification of {len(records)} records"):
+            labels = label_records(records, include_source_fields=include_source_fields)
     include_interactions = env_bool("INTENT_INCLUDE_INTERACTIONS", False)
     clarification_path = None
     if env_bool("INTENT_SEPARATE_CLARIFICATION", False):
@@ -1365,8 +1536,12 @@ def run_initial_load(args: argparse.Namespace) -> None:
         }:
             raise ValueError("Clarification output must differ from count and missing outputs")
     with progress("writing classification and count outputs"):
-        if include_interactions:
-            classification_paths = write_interaction_output(database, output_path, labels, clarification_path)
+        if cids is not None:
+            classification_paths = incremental.paths
+        elif include_interactions:
+            classification_paths = write_interaction_output(
+                database, output_path, labels, clarification_path, write_back=write_back
+            )
         else:
             classification_paths = write_classification_output(output_path, labels, clarification_path)
         write_intent_count_csv(count_output_path, labels)
@@ -1412,7 +1587,7 @@ def run_initial_load(args: argparse.Namespace) -> None:
         else:
             write_csv(missing_output_path, missing_labels)
 
-    if write_back:
+    if write_back and not include_interactions and cids is None:
         target = database.get_container_client(target_container_name)
         with progress("Cosmos label write-back"):
             write_labels_to_container(target, labels)

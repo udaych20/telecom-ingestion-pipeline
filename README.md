@@ -115,6 +115,23 @@ agent/context and tool-call source records in each classified row. The shared
 context by `run_id = CID`, tools by context run IDs, and feedback by CID list.
 Configure the four `COSMOS_*_CONTAINER` settings for your source containers.
 
+Interaction fetches use `INTERACTION_BATCH_SIZE=100` unique CIDs per batch
+and `INTERACTION_MAX_WORKERS=10` concurrent workers. Use a batch size of 50 for
+smaller batches. A single writer flushes each completed CID immediately, in
+completion order. Successful results in a failed batch are saved before the run
+stops; the next batch starts only after the current batch is drained. Large
+interaction payloads are released after writing instead of being retained on
+all classification rows. Optional Cosmos label write-back runs per completed CID.
+When `INTENT_CIDS_FROM_CSV=true`, these settings also batch source retrieval:
+each worker fetches, classifies, and optionally enriches a CID before the single
+writer immediately appends its rows. CSV headers are created before connecting
+to Cosmos and expanded on disk if later records introduce new columns. Completed
+rows remain if a later CID fails. With Cosmos discovery mode (CSV selection off),
+source retrieval still completes before classification rows are written.
+`INITIAL_BATCH_SIZE` remains the Cosmos page size. Source records and classification
+labels are still retained for audit and Feature Build, so this is not yet an
+end-to-end bounded-memory initial load. A rerun replaces previous outputs.
+
 The new columns are `interaction.run_ids`, `interaction.chat_history`,
 `interaction.context_history`, `interaction.tool_history`, and
 `interaction.feedback`. Each contains JSON text preserving the original records,

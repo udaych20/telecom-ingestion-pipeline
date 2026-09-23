@@ -1,6 +1,7 @@
 import json
 import csv
 import tempfile
+import threading
 from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
@@ -10,6 +11,26 @@ from intent_app import attach_interactions, write_interaction_output
 
 
 class InteractionTests(unittest.TestCase):
+    @patch("intent_app.attach_interactions")
+    def test_parallel_batches_flush_before_next_batch_and_release_payloads(self, attach):
+        labels = [{"conversation_id": str(i), "classification.intent": "query"} for i in range(4)]
+        barrier = threading.Barrier(2)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "out.csv"
+            def fetch(database, group):
+                cid = int(group[0]["conversation_id"])
+                if cid >= 2:
+                    with output.open(encoding="utf-8-sig", newline="") as file:
+                        self.assertGreaterEqual(len(list(csv.DictReader(file))), 2)
+                barrier.wait(timeout=5)
+                group[0]["interaction.tool_history"] = "[]"
+            attach.side_effect = fetch
+            write_interaction_output(Mock(), output, labels, batch_size=2, workers=2)
+            with output.open(encoding="utf-8-sig", newline="") as file:
+                rows = list(csv.DictReader(file))
+            self.assertEqual({row["conversation_id"] for row in rows}, {"0", "1", "2", "3"})
+            self.assertTrue(all("interaction.tool_history" not in row for row in labels))
+
     @patch("intent_app.attach_interactions")
     def test_csv_is_flushed_before_next_cid_and_survives_failure(self, attach):
         with tempfile.TemporaryDirectory() as directory:
@@ -31,8 +52,8 @@ class InteractionTests(unittest.TestCase):
                 for label in group:
                     label["interaction.tool_history"] = '[{"tool":"lookup"}]'
             attach.side_effect = fetch
-            with self.assertRaisesRegex(RuntimeError, "next CID failed"):
-                write_interaction_output(Mock(), output, labels, clarification)
+            with self.assertRaisesRegex(RuntimeError, "CID.*failed"):
+                write_interaction_output(Mock(), output, labels, clarification, batch_size=1, workers=1)
             self.assertEqual(len(read(output)), 1)
             self.assertEqual(len(read(clarification)), 1)
             self.assertEqual(json.loads(read(output)[0]["interaction.tool_history"]),
