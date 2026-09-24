@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import time
 import tempfile
+import threading
 from collections import Counter, defaultdict
 from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -41,6 +42,7 @@ from azure.identity import DefaultAzureCredential
 from interaction_reader import get_interaction as read_interaction
 from pipeline_logging import LOGGER, configure_logging, progress
 from pipeline_auth import create_pipeline_credential, check_cosmos_authentication
+from resume_export import ResumeExport
 
 
 TICKET_ID_RE = re.compile(
@@ -1331,7 +1333,7 @@ def write_interaction_output(database, path, labels, clarification_path=None,
 class IncrementalOutput:
     """Append rows immediately, widening CSV headers on disk when needed."""
 
-    def __init__(self, path, clarification_path=None):
+    def __init__(self, path, clarification_path=None, resume=False):
         self.paths = [path] if clarification_path is None else [path, clarification_path]
         if any(p.suffix.lower() not in {".csv", ".jsonl", ".ndjson"} for p in self.paths):
             raise ValueError("Output must be CSV or JSONL")
@@ -1343,6 +1345,15 @@ class IncrementalOutput:
         self.columns = ["source_id", "conversation_id", "classification.intent"]
         # Interaction JSON cells can exceed csv's default parser field limit.
         csv.field_size_limit(2**31 - 1)
+        if resume:
+            headers = []
+            for target in self.paths:
+                with target.open(encoding="utf-8-sig", newline="") as source:
+                    headers.append(next(csv.reader(source)))
+            if any(header != headers[0] for header in headers):
+                raise ValueError("Resume CSV headers differ; restore matching output files")
+            self.columns = headers[0]
+            return
         for target in self.paths:
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.suffix.lower() == ".csv":
@@ -1377,35 +1388,50 @@ class IncrementalOutput:
                     files[index].write(json.dumps(row, ensure_ascii=False) + "\n")
             for file in files:
                 file.flush()
+                os.fsync(file.fileno())
 
 
 def export_selected_cids(database, container, cids, output, *, start_time=None,
                          end_time=None, page_size=None, max_records=None,
                          include_source_fields=True, include_interactions=False,
-                         batch_size=100, workers=10, write_back=False):
+                         batch_size=100, workers=10, write_back=False,
+                         checkpoint=None, worker_factory=None):
     """Finish and persist each selected CID without waiting for the entire list."""
     if batch_size < 1 or workers < 1:
         raise ValueError("Batch size and workers must be positive")
     records, labels = [], []
     selected = iter(cids)
+    local = threading.local()
+    clients = []
+    clients_lock = threading.Lock()
 
     def fetch(cid):
+        worker_database, worker_container = database, container
+        if worker_factory is not None:
+            if not hasattr(local, "connection"):
+                client, worker_database, worker_container = worker_factory()
+                local.connection = worker_database, worker_container
+                with clients_lock:
+                    clients.append(client)
+            worker_database, worker_container = local.connection
         with progress("selected CID source query"):
-            fetched = load_cosmos_records(container, max_records, start_time=start_time,
+            fetched = load_cosmos_records(worker_container, max_records, start_time=start_time,
                                           end_time=end_time, batch_size=page_size, cids=[cid])
         classified = label_records(fetched, include_source_fields=include_source_fields)
-        enriched = fetch_interaction_rows(database, classified) if include_interactions and classified else classified
+        enriched = fetch_interaction_rows(worker_database, classified) if include_interactions and classified else classified
         return fetched, classified, enriched
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    with ExitStack() as resources:
+        resources.callback(lambda: [client.close() for client in clients])
+        executor = resources.enter_context(ThreadPoolExecutor(max_workers=workers))
         batch_number = 0
         while batch := list(islice(selected, batch_size)):
             batch_number += 1
             LOGGER.info("Source batch %s: %s CIDs, %s workers", batch_number, len(batch), workers)
-            pending = {executor.submit(fetch, cid) for cid in batch}
+            pending = {executor.submit(fetch, cid): cid for cid in batch}
             failures = []
             for future in as_completed(pending):
-                pending.remove(future)
+                cid = pending.pop(future)
                 try:
                     fetched, classified, enriched = future.result()
                 except Exception as error:
@@ -1418,6 +1444,8 @@ def export_selected_cids(database, container, cids, output, *, start_time=None,
                 if write_back and enriched:
                     target = database.get_container_client(os.getenv("INTENT_TARGET_CONTAINER", "intent-labels"))
                     write_labels_to_container(target, enriched)
+                if checkpoint is not None:
+                    checkpoint.mark(cid, len(enriched))
                 records.extend(fetched)
                 labels.extend(classified)
                 LOGGER.info("CSV saved: %s classified rows; batch %s", len(labels), batch_number)
@@ -1497,6 +1525,38 @@ def run_initial_load(args: argparse.Namespace) -> None:
     }:
         raise ValueError("CID input file must differ from output paths")
     LOGGER.info("Classification output directory: %s", output_path.parent.resolve())
+    resume = env_bool("INTENT_RESUME", False)
+    checkpoint_supported = cids is not None and max_records is None and output_path.suffix.lower() == ".csv"
+    if resume and not checkpoint_supported:
+        raise ValueError("INTENT_RESUME requires INTENT_CIDS_FROM_CSV=true, CSV output and no INTENT_MAX_RECORDS")
+    if resume and start_time is not None and not (args.end_time or optional_env_time("INITIAL_END_TIME")):
+        raise ValueError("Resume with a time range requires the original explicit INITIAL_END_TIME")
+    checkpoint = None
+    previous_labels = []
+    if checkpoint_supported:
+        csv.field_size_limit(2**31 - 1)
+        paths = [output_path] + ([clarification_path] if clarification_path else [])
+        scope = dict(endpoint=endpoint, database=database_name, container=container_name,
+                     start=start_time, end=end_time, interactions=include_interactions,
+                     source_fields=include_source_fields, write_back=write_back,
+                     paths=[str(p.resolve()) for p in paths],
+                     containers={key: os.getenv(key, '') for key in (
+                         'COSMOS_CHAT_CONTAINER', 'COSMOS_CONTEXT_CONTAINER',
+                         'COSMOS_TOOLS_CONTAINER', 'COSMOS_FEEDBACK_CONTAINER')})
+        checkpoint = ResumeExport(paths, resume, scope)
+        if resume:
+            for row in checkpoint.read_rows():
+                label = {key: value for key, value in row.items() if not key.startswith('interaction')}
+                for key in ('classification.needs_human_review', 'human_reviewed', 'source.human_reviewed'):
+                    if key in label:
+                        label[key] = str(label[key]).lower() == 'true'
+                if label.get('classification.confidence'):
+                    label['classification.confidence'] = float(label['classification.confidence'])
+                previous_labels.append(label)
+            original_count = len(cids)
+            cids = [cid for cid in cids if cid not in checkpoint.completed]
+            LOGGER.info('Resume: skipping %s completed CIDs; %s remaining', original_count - len(cids), len(cids))
+            LOGGER.info('Missing-record audit will cover only the remaining CIDs in this run')
     with progress("Azure credential initialization"):
         credential = create_pipeline_credential()
     try:
@@ -1505,11 +1565,16 @@ def run_initial_load(args: argparse.Namespace) -> None:
     except BaseException:
         credential.close()
         raise
-    incremental = IncrementalOutput(output_path, clarification_path)
+    incremental = IncrementalOutput(output_path, clarification_path, resume=resume)
     with progress("Cosmos client initialization and authentication"):
         client = CosmosClient(endpoint, credential=credential)
     database = client.get_database_client(database_name)
     source_container = database.get_container_client(container_name)
+
+    def worker_factory():
+        worker_client = CosmosClient(endpoint, credential=credential)
+        worker_database = worker_client.get_database_client(database_name)
+        return worker_client, worker_database, worker_database.get_container_client(container_name)
 
     if start_time is not None:
         print(
@@ -1517,14 +1582,20 @@ def run_initial_load(args: argparse.Namespace) -> None:
             f"{start_time.isoformat()} through {end_time.isoformat()}"
         )
     if cids is not None:
-        records, labels = export_selected_cids(
-            database, source_container, cids, incremental,
-            start_time=start_time, end_time=end_time, page_size=batch_size,
-            max_records=max_records, include_source_fields=include_source_fields,
-            include_interactions=include_interactions,
-            batch_size=env_int("INTERACTION_BATCH_SIZE") or 100,
-            workers=env_int("INTERACTION_MAX_WORKERS") or 10, write_back=write_back,
-        )
+        try:
+            records, labels = export_selected_cids(
+                database, source_container, cids, incremental,
+                start_time=start_time, end_time=end_time, page_size=batch_size,
+                max_records=max_records, include_source_fields=include_source_fields,
+                include_interactions=include_interactions,
+                batch_size=env_int("INTERACTION_BATCH_SIZE") or 100,
+                workers=env_int("INTERACTION_MAX_WORKERS") or 10, write_back=write_back,
+                checkpoint=checkpoint, worker_factory=worker_factory,
+            )
+        finally:
+            if checkpoint is not None:
+                checkpoint.close()
+        labels = previous_labels + labels
     else:
         with progress("Cosmos source retrieval (including lazy authentication)"):
             records = load_cosmos_records(
