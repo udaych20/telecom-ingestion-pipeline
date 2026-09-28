@@ -30,12 +30,17 @@ and cross-origin requests but has no user authentication; other programs on the
 same computer can access it while running.
 
 Search is by literal CID text. Conversations and source records are paginated,
-20 at a time. Agent/function/intent summary fields use the explicit CSV columns
-when present. Older exports still show source IDs and their complete data.
-Open a record to view its CSV fields, including input, output and original JSON.
-Long records are shown in 32,000-character chunks, replacing the previous chunk
-to keep browser memory bounded. Summary truncation does not alter stored data.
+20 at a time. The viewer reuses the original HTML's styling and chat, agent,
+tool and feedback renderers. Source filters apply to the selected conversation;
+source counts cover the whole conversation, not just the loaded page.
+Feedback summary cards cover the whole export and are cached on disk at startup.
+Existing indexes are reused; the first updated run prepares the feedback summary.
 
-This is a separate large-file viewer, not a replacement for the HTML viewer's
-full-text search, formatted chat view or feedback dashboard. Those features are
-not included here. It does not modify or correct intent classifications.
+Records up to 64,000 serialized characters are rendered as formatted cards.
+Larger records show a summary and a complete, chunked CSV-row view with Previous
+and Next buttons. Each text chunk is 32,000 characters and replaces the previous
+chunk to keep browser memory bounded. No stored values are truncated.
+
+Keep `interactions-viewer.html` and `large-viewer.js` beside the Python script;
+they supply the shared design and large-file controls. Search remains CID-only,
+not full-text search. This viewer does not modify or correct intent classifications.

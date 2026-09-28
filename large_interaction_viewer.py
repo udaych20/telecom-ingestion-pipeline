@@ -13,56 +13,67 @@ from urllib.parse import parse_qs, urlparse
 PAGE_SIZE = 20
 # Large individual cells are fetched separately, in bounded text chunks.
 TEXT_CHUNK = 32000
-PAGE = """<!doctype html><meta charset="utf-8"><title>NORA Large Interaction Viewer</title>
-<style>body{font:16px system-ui;margin:24px;background:#f4f7fa;color:#152b40}
-button,input{padding:8px;margin:4px}article{background:white;padding:16px;margin:12px 0;border:1px solid #ccd}
-pre{white-space:pre-wrap;overflow-wrap:anywhere}#layout{display:grid;grid-template-columns:320px 1fr;gap:20px}
-#cids button{display:block;overflow-wrap:anywhere;width:100%;text-align:left}#status{color:#934}
-</style><h1>NORA Large Interaction Viewer</h1><p>Local disk-backed view · original CSV is unchanged</p>
-<p id="status"></p><div id="layout"><aside><input id="search" placeholder="Search CID (literal text)">
-<button id="find">Search</button><div id="cids"></div><button id="prevCid">Previous</button>
-<button id="nextCid">Next</button></aside><main><h2 id="selected">Select a conversation</h2>
-<p id="info"></p><button id="prevRow">Previous records</button><button id="nextRow">Next records</button>
-<div id="records"></div></main></div>
-<script>
-let cidPage=0,rowPage=0,selected='',query='';
-const el=id=>document.getElementById(id);
-async function api(path){const r=await fetch(path);if(!r.ok)throw Error(await r.text());return r.json()}
-function guarded(fn){return async()=>{try{el('status').textContent='';await fn()}catch(e){el('status').textContent=e.message}}}
-async function conversations(){
- const data=await api('/api/cids?page='+cidPage+'&q='+encodeURIComponent(query));
- el('cids').replaceChildren();for(const row of data.rows){const b=document.createElement('button');
- b.textContent=row.cid+' ('+row.count+' records)';b.onclick=guarded(async()=>{selected=row.cid;rowPage=0;await records()});el('cids').append(b)}
- el('prevCid').disabled=cidPage===0;el('nextCid').disabled=!data.more;
-}
-async function records(){
- const wanted=selected,page=rowPage;
- const data=await api('/api/records?cid='+encodeURIComponent(wanted)+'&page='+page);
- if(selected!==wanted||rowPage!==page)return;
- el('selected').textContent=wanted;el('info').textContent='Records '+(page*20+1)+'–'+(page*20+data.rows.length);
- el('records').replaceChildren();el('prevRow').disabled=page===0;el('nextRow').disabled=!data.more;
- for(const row of data.rows){const card=document.createElement('article');const title=document.createElement('h3');
- title.textContent=row.source+' · '+row.record_id;card.append(title);
- const summary=document.createElement('pre');summary.textContent='Intent: '+row.intent+'\\nAgent: '+row.agent+'\\nFunction: '+row.function_name+'\\nRun: '+row.run_id;card.append(summary);
- const note=document.createElement('p');note.textContent='Long summary fields are previews. Open CSV row for complete values.';card.append(note);
- const button=document.createElement('button');button.textContent='Open CSV row (input/output and full JSON)';card.append(button);
- const output=document.createElement('pre');card.append(output);let offset=0;
- button.onclick=guarded(async()=>{const part=await api('/api/text?id='+row.id+'&offset='+offset);
- output.textContent=part.text;offset=part.next;button.textContent=part.more?'Next text chunk':'End of record';button.disabled=!part.more});
- el('records').append(card);}
-}
-el('find').onclick=guarded(async()=>{query=el('search').value;cidPage=0;await conversations()});
-el('prevCid').onclick=guarded(async()=>{cidPage--;await conversations()});
-el('nextCid').onclick=guarded(async()=>{cidPage++;await conversations()});
-el('prevRow').onclick=guarded(async()=>{if(selected){rowPage--;await records()}});
-el('nextRow').onclick=guarded(async()=>{if(selected){rowPage++;await records()}});
-guarded(conversations)();
-</script>"""
+PREVIEW_LIMIT = 64000
+
+
+def viewer_page():
+    """Reuse the standalone viewer's styles and record renderers."""
+    original = Path(__file__).with_name('interactions-viewer.html').read_text(encoding='utf-8')
+    head = original.split('</head>')[0] + '</head>'
+    helpers = original.split('  function parseRowJSON(row){', 1)[1].split('})();', 1)[0]
+    script = Path(__file__).with_name('large-viewer.js').read_text(encoding='utf-8')
+    return head + '''<body>
+    <header><h1>NORA Interaction Viewer</h1><p>Conversation and execution records · large-file, disk-backed mode</p></header>
+    <div id="error" class="error" role="alert"></div>
+    <section class="toolbar"><button id="find">Search conversations</button>
+    <input id="search" placeholder="Search CID (not full-text)">
+    <select id="source" aria-label="Filter by source"><option value="">All sources</option>
+    <option value="chat_history">Chat history</option><option value="context_history">Context history (Agent)</option>
+    <option value="tool_history">Tool history</option><option value="feedback">Feedback</option></select></section>
+    <section id="feedback-overview" class="feedback-overview" style="display:block"></section>
+    <main><aside><div class="aside-title" id="cid-title">Conversations</div><div id="cids"></div>
+    <button id="prevCid">Previous</button><button id="nextCid">Next</button></aside>
+    <section class="content"><div class="title-row"><h2 id="selected">Select a conversation</h2><div class="stats" id="stats"></div></div>
+    <p class="meta" id="info"></p><button id="prevRow">Previous records</button><button id="nextRow">Next records</button>
+    <div id="records"></div></section></main><script>(()=>{
+    const state={query:''}, error=document.getElementById('error');
+    const preferred=['agent','function_name','function_arguments','function_result','content','message','error'];
+    function parseRowJSON(row){''' + helpers + script + '\n})();</script></body></html>'
 
 
 def signature(path):
     stat = path.stat()
     return json.dumps([str(path.resolve()), stat.st_size, stat.st_mtime_ns])
+
+
+def prepare_overview(index):
+    """Cache feedback totals once, including for indexes made by older versions."""
+    with closing(sqlite3.connect(index)) as db, db:
+        if db.execute("SELECT 1 FROM metadata WHERE key='feedback_overview'").fetchone():
+            return
+        print('Preparing feedback overview on disk…', flush=True)
+        db.execute('CREATE TEMP TABLE seen_feedback(cid TEXT,record_id TEXT,PRIMARY KEY(cid,record_id))')
+        positive = negative = 0
+        import hashlib
+        for cid, record_id, payload in db.execute("SELECT cid,record_id,payload FROM records WHERE source='feedback'"):
+            row = json.loads(payload)
+            raw = row.get('data') or ''
+            key = record_id or hashlib.sha256(raw.encode()).hexdigest()
+            cursor = db.execute('INSERT OR IGNORE INTO seen_feedback VALUES(?,?)', (cid, key))
+            if not cursor.rowcount:
+                continue
+            try:
+                record = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(record, dict):
+                continue
+            value = record.get('negative_feedbacks', record.get('negative_feedback'))
+            is_negative = bool(value) if isinstance(value, (dict, list)) else False
+            negative += int(is_negative)
+            positive += int(not is_negative)
+        db.execute("INSERT INTO metadata VALUES('feedback_overview',?)",
+                   (json.dumps(dict(positive=positive, negative=negative, documents=positive + negative)),))
 
 
 def build_index(source, destination):
@@ -135,9 +146,23 @@ def query_index(index, route, params):
         elif route == '/api/records':
             rows = db.execute("SELECT id,substr(source,1,200) source,substr(record_id,1,200) record_id,"
                               "substr(intent,1,500) intent,substr(agent,1,500) agent,"
-                              "substr(function_name,1,500) function_name,substr(run_id,1,200) run_id "
-                              "FROM records WHERE cid=? ORDER BY id LIMIT ? OFFSET ?",
-                              (value('cid'), PAGE_SIZE + 1, page * PAGE_SIZE)).fetchall()
+                              "substr(function_name,1,500) function_name,substr(run_id,1,200) run_id,"
+                              "CASE WHEN length(payload)<=? THEN payload ELSE NULL END preview "
+                              "FROM records WHERE cid=? AND (?='' OR source=?) ORDER BY id LIMIT ? OFFSET ?",
+                              (PREVIEW_LIMIT, value('cid'), value('source'), value('source'), PAGE_SIZE + 1, page * PAGE_SIZE)).fetchall()
+            result = []
+            for row in rows[:PAGE_SIZE]:
+                item = dict(row)
+                preview = item.pop('preview')
+                item['preview'] = json.loads(preview) if preview is not None else None
+                result.append(item)
+            counts = dict(db.execute("SELECT source,count(*) FROM records WHERE cid=? GROUP BY source", (value('cid'),)).fetchall())
+            return {'rows': result, 'more': len(rows) > PAGE_SIZE, 'counts': counts}
+        elif route == '/api/overview':
+            # Feedback counts use the same convention as the original viewer:
+            # non-empty negative feedback means negative; otherwise positive.
+            counts = db.execute("SELECT value FROM metadata WHERE key='feedback_overview'").fetchone()
+            return json.loads(counts[0]) if counts else {}
         else:
             raise ValueError('Unknown endpoint')
         return {'rows': [dict(row) for row in rows[:PAGE_SIZE]], 'more': len(rows) > PAGE_SIZE}
@@ -154,7 +179,7 @@ def handler(index):
             request = urlparse(self.path)
             try:
                 if request.path == '/':
-                    body, content_type = PAGE.encode(), 'text/html; charset=utf-8'
+                    body, content_type = viewer_page().encode(), 'text/html; charset=utf-8'
                 else:
                     body = json.dumps(query_index(index, request.path, parse_qs(request.query))).encode()
                     content_type = 'application/json'
@@ -181,6 +206,7 @@ def main():
     parser.add_argument('--port', type=int, default=8765)
     args = parser.parse_args()
     build_index(args.csv, args.index)
+    prepare_overview(args.index)
     with ThreadingHTTPServer(('127.0.0.1', args.port), handler(args.index)) as server:
         print(f'Open http://127.0.0.1:{server.server_port} — Ctrl+C to stop', flush=True)
         try:

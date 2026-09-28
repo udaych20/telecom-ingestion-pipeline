@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from large_interaction_viewer import build_index, query_index, TEXT_CHUNK
+from large_interaction_viewer import build_index, query_index, TEXT_CHUNK, prepare_overview, viewer_page
 
 
 class LargeViewerTests(unittest.TestCase):
@@ -27,6 +27,10 @@ class LargeViewerTests(unittest.TestCase):
             cids = query_index(index, '/api/cids', {})
             self.assertEqual(cids['rows'], [{'cid': '001', 'count': 25}])
             first = query_index(index, '/api/records', {'cid': ['001']})
+            self.assertIsNone(first['rows'][0]['preview'])
+            self.assertIsNotNone(first['rows'][1]['preview'])
+            self.assertEqual(first['counts'], {'tool_history': 25})
+            self.assertEqual(query_index(index, '/api/records', {'cid': ['001'], 'source': ['chat_history']})['rows'], [])
             self.assertEqual(len(first['rows']), 20)
             self.assertTrue(first['more'])
             last = query_index(index, '/api/records', {'cid': ['001'], 'page': ['1']})
@@ -41,6 +45,9 @@ class LargeViewerTests(unittest.TestCase):
                 if not part['more']:
                     break
             self.assertEqual(json.loads(''.join(chunks))['input'], large)
+            prepare_overview(index)
+            prepare_overview(index)
+            self.assertEqual(query_index(index, '/api/overview', {})['documents'], 0)
             self.assertEqual(query_index(index, '/api/cids', {'q': ["' OR 1=1 --"]})['rows'], [])
             with source.open('a', encoding='utf-8') as file:
                 file.write('\n')
@@ -55,3 +62,11 @@ class LargeViewerTests(unittest.TestCase):
                 build_index(source, source)
             with self.assertRaises(ValueError):
                 build_index(source, Path(folder) / 'bad.sqlite3')
+
+    def test_reuses_original_renderers(self):
+        page = viewer_page()
+        self.assertIn('function renderChatMessages', page)
+        self.assertIn('function renderContextHistory', page)
+        self.assertIn('function renderFeedback', page)
+        self.assertIn('Filter by source', page)
+        self.assertNotIn('file.stream()', page)
