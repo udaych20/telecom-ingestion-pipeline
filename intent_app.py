@@ -734,20 +734,59 @@ def build_intent_count_rows(
     return rows
 
 
+SAMPLE_INTENTS = ('ticket', 'modify', 'rca', 'query', 'general', 'clarification_needed')
+
+
+class IntentSampler:
+    """Take the first available classified rows, with a shared per-intent quota."""
+
+    def __init__(self, limit):
+        if limit < 1:
+            raise ValueError('INTENT_SAMPLES_PER_INTENT must be positive')
+        self.limit = limit
+        self.counts = Counter()
+        self.lock = threading.Lock()
+
+    def select(self, labels):
+        selected = []
+        with self.lock:
+            for label in labels:
+                intent = label['classification.intent']
+                if intent not in SAMPLE_INTENTS:
+                    raise ValueError(f'Unknown intent in sampling: {intent}')
+                if self.counts[intent] < self.limit:
+                    self.counts[intent] += 1
+                    selected.append(label)
+        return selected
+
+    def full(self):
+        with self.lock:
+            return all(self.counts[intent] >= self.limit for intent in SAMPLE_INTENTS)
+
+
 def write_intent_count_csv(
     path: Path,
     labels: Iterable[dict[str, Any]],
+    sample_limit: int | None = None,
 ) -> None:
     rows = build_intent_count_rows(labels)
+    columns = ['classification_intent', 'classified_record_count', 'unique_cid_count']
+    if sample_limit is not None:
+        present = {row['classification_intent'] for row in rows}
+        rows[-1:-1] = [dict(classification_intent=intent, classified_record_count=0, unique_cid_count=0)
+                      for intent in SAMPLE_INTENTS if intent not in present]
+        columns.extend(('requested_samples', 'sample_shortfall'))
+        for row in rows:
+            target = sample_limit * (len(SAMPLE_INTENTS) if row['classification_intent'] == 'ALL_INTENTS' else 1)
+            row['requested_samples'] = target
+            row['sample_shortfall'] = max(0, target - row['classified_record_count'])
+            LOGGER.info('Intent sample %s: selected=%s target=%s shortfall=%s',
+                        row['classification_intent'], row['classified_record_count'], target, row['sample_shortfall'])
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.DictWriter(
             file,
-            fieldnames=(
-                "classification_intent",
-                "classified_record_count",
-                "unique_cid_count",
-            ),
+            fieldnames=columns,
         )
         writer.writeheader()
         writer.writerows(rows)
@@ -1395,7 +1434,7 @@ def export_selected_cids(database, container, cids, output, *, start_time=None,
                          end_time=None, page_size=None, max_records=None,
                          include_source_fields=True, include_interactions=False,
                          batch_size=100, workers=10, write_back=False,
-                         checkpoint=None, worker_factory=None):
+                         checkpoint=None, worker_factory=None, sampler=None):
     """Finish and persist each selected CID without waiting for the entire list."""
     if batch_size < 1 or workers < 1:
         raise ValueError("Batch size and workers must be positive")
@@ -1418,6 +1457,8 @@ def export_selected_cids(database, container, cids, output, *, start_time=None,
             fetched = load_cosmos_records(worker_container, max_records, start_time=start_time,
                                           end_time=end_time, batch_size=page_size, cids=[cid])
         classified = label_records(fetched, include_source_fields=include_source_fields)
+        if sampler is not None:
+            classified = sampler.select(classified)
         enriched = fetch_interaction_rows(worker_database, classified) if include_interactions and classified else classified
         return fetched, classified, enriched
 
@@ -1452,6 +1493,9 @@ def export_selected_cids(database, container, cids, output, *, start_time=None,
                 del enriched, fetched, classified, future
             if failures:
                 raise RuntimeError(f"Source batch {batch_number} failed for {len(failures)} CIDs; saved rows remain") from failures[0]
+            if sampler is not None and sampler.full():
+                LOGGER.info('All per-intent sample quotas reached; stopping after this batch')
+                break
             if max_records is not None and len(records) >= max_records:
                 break
     return records, labels
@@ -1480,9 +1524,20 @@ def run_initial_load(args: argparse.Namespace) -> None:
     if count_output_path.resolve() == output_path.resolve():
         raise ValueError("INTENT_COUNT_OUTPUT must differ from INTENT_OUTPUT")
     max_records = env_int("INTENT_MAX_RECORDS")
+    sampler = None
+    if env_bool('INTENT_SAMPLING_ENABLED', False):
+        limit = env_int('INTENT_SAMPLES_PER_INTENT')
+        sampler = IntentSampler(1000 if limit is None else limit)
+        if max_records is not None:
+            raise ValueError('Per-intent sampling requires INTENT_MAX_RECORDS to be empty')
+        if env_bool('INTENT_RESUME', False):
+            raise ValueError('Per-intent sampling currently requires INTENT_RESUME=false; use fresh output paths')
     workers = env_int("INTENT_MAX_WORKERS") or 1
     batch_size = env_int("INITIAL_BATCH_SIZE")
     find_missing = env_bool("INTENT_FIND_MISSING", False)
+    if sampler is not None and find_missing:
+        LOGGER.info('Skipping missing-record audit in sampling mode; excluded rows are intentional')
+        find_missing = False
     missing_output_path = configured_output_path(
         "INTENT_MISSING_OUTPUT", "intent_labels_missing.csv", "CSV_OUTPUT_DIR"
     )
@@ -1543,6 +1598,8 @@ def run_initial_load(args: argparse.Namespace) -> None:
                      containers={key: os.getenv(key, '') for key in (
                          'COSMOS_CHAT_CONTAINER', 'COSMOS_CONTEXT_CONTAINER',
                          'COSMOS_TOOLS_CONTAINER', 'COSMOS_FEEDBACK_CONTAINER')})
+        if sampler is not None:
+            scope['samples_per_intent'] = sampler.limit
         checkpoint = ResumeExport(paths, resume, scope)
         if resume:
             for row in checkpoint.read_rows():
@@ -1591,6 +1648,7 @@ def run_initial_load(args: argparse.Namespace) -> None:
                 batch_size=env_int("INTERACTION_BATCH_SIZE") or 100,
                 workers=env_int("INTERACTION_MAX_WORKERS") or 10, write_back=write_back,
                 checkpoint=checkpoint, worker_factory=worker_factory,
+                sampler=sampler,
             )
         finally:
             if checkpoint is not None:
@@ -1603,6 +1661,8 @@ def run_initial_load(args: argparse.Namespace) -> None:
             )
         with progress(f"intent classification of {len(records)} records"):
             labels = label_records(records, include_source_fields=include_source_fields)
+            if sampler is not None:
+                labels = sampler.select(labels)
     include_interactions = env_bool("INTENT_INCLUDE_INTERACTIONS", False)
     clarification_path = None
     if env_bool("INTENT_SEPARATE_CLARIFICATION", False):
@@ -1622,7 +1682,7 @@ def run_initial_load(args: argparse.Namespace) -> None:
             )
         else:
             classification_paths = write_classification_output(output_path, labels, clarification_path)
-        write_intent_count_csv(count_output_path, labels)
+        write_intent_count_csv(count_output_path, labels, sample_limit=sampler.limit if sampler else None)
 
     missing_records: list[dict[str, Any]] = []
     inventory_count: int | None = None

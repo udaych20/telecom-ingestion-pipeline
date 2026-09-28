@@ -161,6 +161,9 @@ Both files are included in optional Blob uploads. Counts, Cosmos write-back, and
 Feature Build still receive all labels and retain their existing filtering rules.
 The flag defaults to false and requires CSV output when enabled.
 
+For up to 1,000 classified rows per intent with optional
+interactions, see [per-intent sampling](docs/intent-sampling.md).
+
 `intent_app.py` is the configuration-driven entry point for the initial and
 streaming phases. Set `INITIAL_LOAD_ENABLED` and `STREAM_LOAD_ENABLED` in
 `intent_app_config.env`. When both are true, the historical load completes first
