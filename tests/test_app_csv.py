@@ -9,6 +9,22 @@ import app
 
 
 class AppCsvTests(unittest.TestCase):
+    def test_csv_cids_only_and_batching(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "cids.csv"
+            path.write_text("cid\n001\n002\n001\n\n003\n", encoding="utf-8-sig")
+            with patch.object(app, "INTERACTION_CIDS_FROM_CSV", True), \
+                    patch.object(app, "INTERACTION_CIDS_CSV", str(path)), \
+                    patch.object(app, "INTERACTION_CID_COLUMN", "cid"), \
+                    patch.object(app, "BATCH_SIZE", 2), patch.object(app, "BATCH_LIMIT", 0):
+                # None proves the CSV path does not access Cosmos for discovery.
+                self.assertEqual(list(app.get_chat_id_batches(None)), [["001", "002"], ["003"]])
+                with patch.object(app, "BATCH_LIMIT", 1):
+                    self.assertEqual(list(app.get_chat_id_batches(None)), [["001"]])
+                path.write_text("wrong\n001\n", encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    list(app.get_chat_id_batches(None))
+
     def test_sampler_unique_cids_and_multiple_intents(self):
         sampler = app.InteractionSampler(1)
         interaction = {"interaction_id": "one"}

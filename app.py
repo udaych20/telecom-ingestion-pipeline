@@ -2,13 +2,14 @@ import json
 import os
 import sys
 import csv
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
-from intent_app import label_records, SAMPLE_INTENTS
+from intent_app import label_records, SAMPLE_INTENTS, load_cids_from_csv
 from interaction_report import FIELDS as REPORT_FIELDS, report_row
 from interaction_reader import (
     find_values, get_interaction as read_interaction,
@@ -33,6 +34,9 @@ BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "10"))
 INTERACTION_SAMPLING_ENABLED = os.getenv("INTERACTION_SAMPLING_ENABLED", "false").lower() == "true"
 INTERACTION_SAMPLES_PER_INTENT = int(os.getenv("INTERACTION_SAMPLES_PER_INTENT", "100"))
+INTERACTION_CIDS_FROM_CSV = os.getenv("INTERACTION_CIDS_FROM_CSV", "false").lower() == "true"
+INTERACTION_CIDS_CSV = os.getenv("INTERACTION_CIDS_CSV", "input/cids.csv")
+INTERACTION_CID_COLUMN = os.getenv("INTERACTION_CID_COLUMN", "cid")
 
 
 
@@ -200,6 +204,17 @@ def save_interaction(interaction):
 
 
 def get_chat_id_batches(database):
+    if INTERACTION_CIDS_FROM_CSV:
+        path = Path(INTERACTION_CIDS_CSV)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parent / path
+        cids = load_cids_from_csv(path, INTERACTION_CID_COLUMN)
+        if BATCH_LIMIT:
+            cids = cids[:BATCH_LIMIT]
+        print(f"Selected {len(cids)} unique CIDs from {path}; no Cosmos CID discovery", flush=True)
+        for start in range(0, len(cids), BATCH_SIZE):
+            yield cids[start:start + BATCH_SIZE]
+        return
     chat = database.get_container_client(CHAT_CONTAINER)
     sql = """
         SELECT message.data.cid AS cid, c._ts AS ts
@@ -311,7 +326,7 @@ if __name__ == "__main__":
 
     all_mode = sys.argv[1] in ("--all", "--all-complete")
     complete_only = sys.argv[1] == "--all-complete"
-    if all_mode:
+    if all_mode and not INTERACTION_CIDS_FROM_CSV:
         print_container_timestamps(database)
     batches = get_chat_id_batches(database) if all_mode else [[sys.argv[1]]]
 

@@ -2,6 +2,22 @@
 
 ## Sample unique interactions per intent in app.py
 
+To restrict sampling to your supplied CIDs, also set these in `.env`:
+
+```dotenv
+INTERACTION_CIDS_FROM_CSV=true
+INTERACTION_CIDS_CSV=input/cids.csv
+INTERACTION_CID_COLUMN=cid
+```
+
+Use a CSV with a `cid` header and one ID per row. Duplicates and blanks are
+removed; order and leading zeros are preserved. Relative paths resolve beside
+`app.py`. With `--all` or `--all-complete`, only these CIDs are candidates;
+Cosmos still supplies their full histories. Missing/invalid input fails instead
+of falling back to Cosmos discovery. If the list cannot fill an intent quota,
+the counts report shows its shortfall. An explicit single CID on the command
+line still selects that CID, independently of the CSV flag.
+
 Set these values in `.env` (not `intent_app_config.env`):
 
 ```dotenv
