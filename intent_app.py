@@ -1741,13 +1741,18 @@ def run_initial_load(args: argparse.Namespace) -> None:
 
 def run_stream_host() -> None:
     """Start the Azure Functions host that owns change-feed/Event Hub triggers."""
+    event_app_dir = Path(__file__).with_name("event_app")
+    if env_bool("STREAM_AUTO_PROVISION", False):
+        from stream_provision import provision_stream
+
+        provision_stream(event_app_dir)
+        return
     executable = shutil.which("func")
     if executable is None:
         raise RuntimeError(
             "Streaming requires Azure Functions Core Tools ('func') on this machine. "
             "In Azure, deploy event_app and let the Function App host run it."
         )
-    event_app_dir = Path(__file__).with_name("event_app")
     print(f"Starting streaming Function host from {event_app_dir.resolve()}")
     subprocess.run(
         [executable, "start", "--script-root", str(event_app_dir)],

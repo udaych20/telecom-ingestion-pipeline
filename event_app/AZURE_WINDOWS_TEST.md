@@ -1,5 +1,9 @@
 # Test the NORA event app from an Azure Windows VM
 
+For configuration-driven creation of missing supporting resources and automatic
+Function publishing, see [automatic live setup](../docs/automatic-stream-setup.md).
+The steps below remain the manual deployment alternative.
+
 Run the sections below in PowerShell, one at a time. Replace every value that
 starts with `YOUR-` before running the Azure setup commands.
 

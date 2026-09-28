@@ -167,6 +167,11 @@ streaming phases. Set `INITIAL_LOAD_ENABLED` and `STREAM_LOAD_ENABLED` in
 and the command then starts the blocking Azure Functions host in `event_app/`.
 Running the streaming phase locally requires Azure Functions Core Tools (`func`);
 in Azure, deploy `event_app/` and let the Function App host own the triggers.
+Alternatively, set `STREAM_AUTO_PROVISION=true` to create missing supporting
+resources and `STREAM_DEPLOY_FUNCTION=true` to publish the Function automatically.
+This mode runs in Azure, not a local host, and leaves existing Cosmos source
+containers unchanged. See [automatic live setup](docs/automatic-stream-setup.md)
+for required settings, permissions, costs and networking limitations.
 
 The initial phase writes the classified export and intent counts. It also writes
 a dummy training manifest and log when `TRAINING_PLACEHOLDER_ENABLED=true`; this
