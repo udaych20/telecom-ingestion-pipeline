@@ -1,6 +1,7 @@
 azure-cosmos
 azure-ai-projects
 azure-eventhub
+azure-eventgrid>=4.22,<5
 azure-functions
 azure-identity
 azure-storage-blob

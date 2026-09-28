@@ -1,4 +1,4 @@
-"""Publish NORA Cosmos DB changes to Azure Event Hubs.
+"""Publish NORA Cosmos DB changes to the configured Azure event transport.
 
 The Cosmos trigger is backed by the change feed, so inserts and updates are
 published automatically.  Source documents are deliberately not copied to the
@@ -21,6 +21,9 @@ import azure.functions as func
 LOGGER = logging.getLogger("nora.event_app")
 LOGGER.setLevel(os.getenv("NORA_LOG_LEVEL", "INFO").upper())
 DATABASE_NAME = os.getenv("COSMOS_DATABASE", "NORA")
+STREAM_TRANSPORT = os.getenv("STREAM_TRANSPORT", "eventhub").strip().lower()
+if STREAM_TRANSPORT not in {"eventhub", "eventgrid"}:
+    raise ValueError("STREAM_TRANSPORT must be eventhub or eventgrid")
 
 app = func.FunctionApp()
 
@@ -63,6 +66,25 @@ class EventHubPublisher:
         LOGGER.info("Event Hubs accepted event id=%s", event["id"])
 
 
+class EventGridPublisher:
+    """Send CloudEvents to an HTTP topic in an Event Grid namespace."""
+
+    def __init__(self):
+        from azure.eventgrid import EventGridPublisherClient
+        from azure.identity import DefaultAzureCredential
+
+        self._credential = DefaultAzureCredential()
+        self._client = EventGridPublisherClient(
+            required("EVENT_GRID_ENDPOINT"), self._credential,
+            namespace_topic=required("EVENT_GRID_TOPIC"),
+        )
+
+    def publish(self, event, partition_key):
+        # Event Grid does not provide Event Hubs partition-key ordering.
+        self._client.send(event)
+        LOGGER.info("Event Grid accepted event id=%s", event["id"])
+
+
 _publisher: Publisher | None = None
 _publisher_lock = threading.Lock()
 
@@ -79,8 +101,8 @@ def get_publisher() -> Publisher:
     if _publisher is None:
         with _publisher_lock:
             if _publisher is None:
-                LOGGER.debug("Creating Event Hubs publisher client")
-                _publisher = EventHubPublisher()
+                LOGGER.debug("Creating %s publisher client", STREAM_TRANSPORT)
+                _publisher = EventGridPublisher() if STREAM_TRANSPORT == "eventgrid" else EventHubPublisher()
     return _publisher
 
 
@@ -222,12 +244,6 @@ def feedback_changes(documents: func.DocumentList) -> None:
     publish_documents(documents, os.getenv("COSMOS_FEEDBACK_CONTAINER", "chat-feedback"))
 
 
-@app.event_hub_message_trigger(
-    arg_name="message",
-    event_hub_name=os.getenv("EVENT_HUB_NAME", "nora-updates"),
-    connection="EVENT_HUB_CONNECTION",
-    consumer_group=os.getenv("EVENT_HUB_CONSUMER_GROUP", "nora-update-subscriber"),
-)
 def nora_update_subscriber(message: func.EventHubEvent) -> None:
     """Subscriber entry point; add downstream processing here."""
     LOGGER.info(
@@ -240,15 +256,71 @@ def nora_update_subscriber(message: func.EventHubEvent) -> None:
     )
     try:
         event = decode_event(message.get_body())
-        data = event["data"]
-        LOGGER.info(
-            "Received NORA update id=%s container=%s document_id=%s cids=%s run_ids=%s",
-            event["id"],
-            data.get("container", ""),
-            data.get("document_id", ""),
-            data.get("cids", []),
-            data.get("run_ids", []),
-        )
+        process_event(event)
     except Exception:
         LOGGER.exception("Failed to process Event Hubs message")
         raise
+
+
+def process_event(event):
+    """Shared subscriber hook. Currently validates and logs; no model inference."""
+    for field in ("id", "source", "type", "data"):
+        if field not in event:
+            raise ValueError(f"Event is missing {field}")
+    data = event["data"]
+    if not isinstance(data, dict):
+        raise ValueError("NORA event data must be an object")
+    LOGGER.info("Received NORA update id=%s container=%s document_id=%s cids=%s run_ids=%s",
+                event["id"], data.get("container", ""), data.get("document_id", ""),
+                data.get("cids", []), data.get("run_ids", []))
+
+
+def consume_grid_events(client):
+    """Acknowledge only successful processing; release failures for redelivery."""
+    batch_size = int(os.getenv("EVENT_GRID_RECEIVE_BATCH_SIZE", "10"))
+    if not 1 <= batch_size <= 100:
+        raise ValueError("EVENT_GRID_RECEIVE_BATCH_SIZE must be between 1 and 100")
+    events = client.receive(max_events=batch_size, max_wait_time=10)
+    failures = 0
+    for detail in events:
+        token = detail.broker_properties.lock_token
+        try:
+            event = detail.event
+            process_event({"id": event.id, "source": event.source, "type": event.type, "data": event.data})
+            result = client.acknowledge(lock_tokens=[token])
+            if result.failed_lock_tokens or token not in result.succeeded_lock_tokens:
+                raise RuntimeError("Event Grid acknowledgement did not succeed")
+        except Exception as error:
+            failures += 1
+            LOGGER.error("Event Grid processing/acknowledgement failed (%s); message will be retried",
+                         type(error).__name__)
+            try:
+                result = client.release(lock_tokens=[token], release_delay=10)
+                if result.failed_lock_tokens or token not in result.succeeded_lock_tokens:
+                    LOGGER.warning("Event Grid release failed; waiting for message lock expiry")
+            except Exception:
+                LOGGER.warning("Event Grid release unavailable; waiting for message lock expiry")
+    LOGGER.info("Event Grid poll: received=%s successful=%s failed=%s", len(events), len(events) - failures, failures)
+    if failures:
+        raise RuntimeError(f"Event Grid poll had {failures} processing/acknowledgement failures")
+
+
+if STREAM_TRANSPORT == "eventhub":
+    nora_update_subscriber = app.event_hub_message_trigger(
+        arg_name="message", event_hub_name=os.getenv("EVENT_HUB_NAME", "nora-updates"),
+        connection="EVENT_HUB_CONNECTION",
+        consumer_group=os.getenv("EVENT_HUB_CONSUMER_GROUP", "nora-update-subscriber"),
+    )(nora_update_subscriber)
+else:
+    @app.timer_trigger(schedule="*/15 * * * * *", arg_name="timer", run_on_startup=False, use_monitor=True)
+    def nora_grid_subscriber(timer: func.TimerRequest) -> None:
+        from azure.eventgrid import EventGridConsumerClient
+        from azure.identity import DefaultAzureCredential
+
+        with DefaultAzureCredential() as credential:
+            with EventGridConsumerClient(
+                required("EVENT_GRID_ENDPOINT"), credential,
+                namespace_topic=required("EVENT_GRID_TOPIC"),
+                subscription=required("EVENT_GRID_SUBSCRIPTION"),
+            ) as client:
+                consume_grid_events(client)

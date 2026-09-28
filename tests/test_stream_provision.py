@@ -54,6 +54,11 @@ class FakeAzure:
             return {'id': SUBSCRIPTION}
         if command == ('cosmosdb', 'show'):
             return {'id': self.cosmos_id, 'documentEndpoint': 'https://existing-cosmos.documents.azure.com/'}
+        if command == ('eventgrid', 'namespace', 'show'):
+            return {'name': option('--name'), 'topicsConfiguration': {'hostname': 'existing-grid.westus2-1.eventgrid.azure.net'}}
+        if command == ('role', 'definition', 'list'):
+            return [{'name': '33333333-3333-3333-3333-333333333333' if option('--name').endswith('Sender')
+                     else '44444444-4444-4444-4444-444444444444'}]
         if command == ('group', 'exists'):
             return self.group_exists
         if command == ('group', 'create'):
@@ -88,6 +93,10 @@ class FakeAzure:
                 resource = {'name': option('--name'), 'id': '/resources/' + option('--name')}
                 if key == ('eventhubs', 'namespace'):
                     resource['sku'] = {'name': 'Standard'}
+                if key == ('eventgrid', 'namespace', 'topic'):
+                    resource['inputSchema'] = 'CloudEventSchemaV1_0'
+                if key == ('eventgrid', 'namespace', 'topic', 'event-subscription'):
+                    resource['deliveryConfiguration'] = {'deliveryMode': 'Queue'}
                 if key == ('functionapp',):
                     resource['tags'] = {'managed-by': OWNER_TAG}
                 if key == ('storage', 'account'):
@@ -101,6 +110,52 @@ class FakeAzure:
 
 @patch.dict(os.environ, ENV, clear=True)
 class ProvisionTests(unittest.TestCase):
+    def test_grid_creates_only_topic_subscription_and_reuses_namespace(self):
+        fake = FakeAzure()
+        grid_env = {'STREAM_TRANSPORT': 'eventgrid', 'EVENT_GRID_NAMESPACE': 'existing-grid',
+                    'EVENT_GRID_RESOURCE_GROUP': 'grid-group', 'EVENT_GRID_TOPIC': 'updates',
+                    'EVENT_GRID_SUBSCRIPTION': 'subscriber', 'EVENT_HUB_NAMESPACE': '',
+                    'EVENT_HUB_NAME': '', 'EVENT_HUB_CONSUMER_GROUP': ''}
+        with patch.dict(os.environ, grid_env), patch('stream_provision.AzureCLI', return_value=fake):
+            provision_stream(APP_DIR)
+            count = len(fake.calls)
+            provision_stream(APP_DIR)
+        self.assertFalse(any(call[0] == 'eventhubs' for call in fake.calls))
+        self.assertFalse(any(call[:3] == ('eventgrid', 'namespace', 'create') for call in fake.calls))
+        self.assertFalse(any('create' in call for call in fake.calls[count:]))
+        self.assertEqual(fake.settings['STREAM_TRANSPORT'], 'eventgrid')
+        self.assertEqual(fake.settings['EVENT_GRID_ENDPOINT'], 'https://existing-grid.westus2-1.eventgrid.azure.net')
+        self.assertNotIn('EVENT_HUB_NAME', fake.settings)
+
+    def test_grid_push_subscription_is_not_silently_reused(self):
+        fake = FakeAzure()
+        fake.resources[('eventgrid', 'namespace', 'topic', 'event-subscription')] = [
+            {'name': 'subscriber', 'deliveryConfiguration': {'deliveryMode': 'Push'}}]
+        grid_env = {'STREAM_TRANSPORT': 'eventgrid', 'EVENT_GRID_NAMESPACE': 'existing-grid',
+                    'EVENT_GRID_RESOURCE_GROUP': 'grid-group', 'EVENT_GRID_TOPIC': 'updates',
+                    'EVENT_GRID_SUBSCRIPTION': 'subscriber'}
+        with patch.dict(os.environ, grid_env), patch('stream_provision.AzureCLI', return_value=fake):
+            with self.assertRaisesRegex(ValueError, 'Queue'):
+                provision_stream(APP_DIR)
+
+    def test_grid_namespace_failure_has_no_creations_or_hub_fallback(self):
+        fake = FakeAzure()
+        original = fake.run
+
+        def run(*args):
+            if args[:3] == ('eventgrid', 'namespace', 'show'):
+                raise RuntimeError('ResourceNotFound')
+            return original(*args)
+
+        fake.run = run
+        env = {'STREAM_TRANSPORT': 'eventgrid', 'EVENT_GRID_NAMESPACE': 'missing-grid',
+               'EVENT_GRID_RESOURCE_GROUP': 'grid-group', 'EVENT_GRID_TOPIC': 'updates',
+               'EVENT_GRID_SUBSCRIPTION': 'subscriber'}
+        with patch.dict(os.environ, env), patch('stream_provision.AzureCLI', return_value=fake):
+            with self.assertRaisesRegex(RuntimeError, 'ResourceNotFound'):
+                provision_stream(APP_DIR)
+        self.assertFalse(any('create' in call or call[0] == 'eventhubs' for call in fake.calls))
+
     def test_create_then_reuse_and_package_allowlist(self):
         fake = FakeAzure()
         with patch('stream_provision.AzureCLI', return_value=fake):

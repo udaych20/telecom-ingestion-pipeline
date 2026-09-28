@@ -5,6 +5,10 @@ supporting Azure resources and publishes `event_app` to Azure. It does not requi
 Azure Functions Core Tools, and it does not leave a local Function host running.
 This creates billable resources. It is disabled by default.
 
+This page describes `STREAM_TRANSPORT=eventhub`. For your existing Event Grid
+namespace, use `STREAM_TRANSPORT=eventgrid` and follow
+[Event Grid live mode](event-grid-stream.md); it needs no Event Hubs resources.
+
 ## Configuration
 
 In `intent_app_config.env`:
@@ -12,6 +16,7 @@ In `intent_app_config.env`:
 ```dotenv
 INITIAL_LOAD_ENABLED=false
 STREAM_LOAD_ENABLED=true
+STREAM_TRANSPORT=eventhub
 STREAM_AUTO_PROVISION=true
 STREAM_DEPLOY_FUNCTION=true
 

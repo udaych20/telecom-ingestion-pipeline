@@ -173,6 +173,11 @@ This mode runs in Azure, not a local host, and leaves existing Cosmos source
 containers unchanged. See [automatic live setup](docs/automatic-stream-setup.md)
 for required settings, permissions, costs and networking limitations.
 
+An existing **Event Grid namespace** is also supported with
+`STREAM_TRANSPORT=eventgrid`. The code publishes CloudEvents to an HTTP topic
+and uses a timer-based pull subscriber instead of an Event Hubs trigger.
+See [Event Grid live mode](docs/event-grid-stream.md) for setup and limitations.
+
 The initial phase writes the classified export and intent counts. It also writes
 a dummy training manifest and log when `TRAINING_PLACEHOLDER_ENABLED=true`; this
 records what would be trained but deliberately does not train a model. Set

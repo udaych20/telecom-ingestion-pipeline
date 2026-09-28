@@ -93,6 +93,60 @@ def grant_role(cli, principal, role, scope):
             '--assignee-principal-type', 'ServicePrincipal', '--role', role, '--scope', scope)
 
 
+def grid_configuration(cli):
+    """Inspect the user's existing namespace; never create a replacement namespace."""
+    group = required('EVENT_GRID_RESOURCE_GROUP')
+    namespace = required('EVENT_GRID_NAMESPACE')
+    topic = required('EVENT_GRID_TOPIC')
+    subscription = required('EVENT_GRID_SUBSCRIPTION')
+    batch_size = int(os.getenv('EVENT_GRID_RECEIVE_BATCH_SIZE', '10'))
+    if not 1 <= batch_size <= 100:
+        raise ValueError('EVENT_GRID_RECEIVE_BATCH_SIZE must be between 1 and 100')
+    resource = cli.run('eventgrid', 'namespace', 'show', '--resource-group', group, '--name', namespace)
+    if resource.get('publicNetworkAccess') in {'Disabled', 'SecuredByPerimeter'} or resource.get('inboundIpRules'):
+        raise ValueError('Event Grid namespace is network-restricted; provide an approved network-aware deployment')
+    hostname = resource.get('topicsConfiguration', {}).get('hostname')
+    if not hostname:
+        raise ValueError('Event Grid namespace has no HTTP topics endpoint; MQTT topic spaces are not supported')
+    endpoint = 'https://' + hostname
+    configured = os.getenv('EVENT_GRID_ENDPOINT', '').strip().rstrip('/')
+    if configured and configured != endpoint:
+        raise ValueError('EVENT_GRID_ENDPOINT does not match the configured Event Grid namespace')
+    roles = []
+    for name in ('EventGrid Data Sender', 'EventGrid Data Receiver'):
+        definitions = cli.run('role', 'definition', 'list', '--name', name)
+        if len(definitions) != 1:
+            raise ValueError(f'Cannot resolve Azure built-in role: {name}')
+        roles.append(definitions[0]['name'])
+    settings = {'STREAM_TRANSPORT': 'eventgrid', 'EVENT_GRID_ENDPOINT': endpoint,
+                'EVENT_GRID_TOPIC': topic, 'EVENT_GRID_SUBSCRIPTION': subscription,
+                'EVENT_GRID_RECEIVE_BATCH_SIZE': str(batch_size)}
+    return group, namespace, settings, roles
+
+
+def ensure_grid_topic(cli, config):
+    group, namespace, settings, roles = config
+    topic, subscription = settings['EVENT_GRID_TOPIC'], settings['EVENT_GRID_SUBSCRIPTION']
+    args = ['--resource-group', group, '--namespace-name', namespace]
+    resource = ensure_named(cli, 'Event Grid HTTP topic',
+        ['eventgrid', 'namespace', 'topic', 'list', *args],
+        ['eventgrid', 'namespace', 'topic', 'create', *args, '--name', topic,
+         '--input-schema', 'CloudEventSchemaV1_0', '--publisher-type', 'Custom',
+         '--event-retention-in-days', '1'], topic)
+    if resource.get('inputSchema') != 'CloudEventSchemaV1_0':
+        raise ValueError('Event Grid topic must accept CloudEvents 1.0')
+    sub = ensure_named(cli, 'Event Grid pull subscription',
+        ['eventgrid', 'namespace', 'topic', 'event-subscription', 'list', *args, '--topic-name', topic],
+        ['eventgrid', 'namespace', 'topic', 'event-subscription', 'create', *args, '--topic-name', topic,
+         '--name', subscription, '--event-delivery-schema', 'CloudEventSchemaV1_0',
+         '--delivery-configuration',
+         '{deliveryMode:Queue,queue:{receiveLockDurationInSeconds:300,maxDeliveryCount:10,eventTimeToLive:P1D}}'],
+        subscription)
+    if sub.get('deliveryConfiguration', {}).get('deliveryMode') != 'Queue':
+        raise ValueError('Existing Event Grid subscription must use Queue (pull) delivery')
+    return resource, settings, roles
+
+
 def provision_stream(event_app_dir: Path):
     """Provision and optionally publish in Azure; never start a second local host."""
     subscription = required('AZURE_SUBSCRIPTION_ID')
@@ -103,15 +157,19 @@ def provision_stream(event_app_dir: Path):
     cosmos_account = required('AZURE_COSMOS_ACCOUNT')
     database = required('COSMOS_DATABASE')
     endpoint = required('COSMOS_ENDPOINT')
-    namespace = required('EVENT_HUB_NAMESPACE').removesuffix('.servicebus.windows.net')
-    hub = required('EVENT_HUB_NAME')
-    consumer = required('EVENT_HUB_CONSUMER_GROUP')
+    transport = os.getenv('STREAM_TRANSPORT', 'eventhub').strip().lower()
+    if transport not in {'eventhub', 'eventgrid'}:
+        raise ValueError('STREAM_TRANSPORT must be eventhub or eventgrid')
+    if transport == 'eventhub':
+        namespace = required('EVENT_HUB_NAMESPACE').removesuffix('.servicebus.windows.net')
+        hub = required('EVENT_HUB_NAME')
+        consumer = required('EVENT_HUB_CONSUMER_GROUP')
     storage = required('STREAM_STORAGE_ACCOUNT')
     app_name = required('STREAM_FUNCTION_APP')
     deploy = flag('STREAM_DEPLOY_FUNCTION', True)
     if not re.fullmatch(r'[a-z0-9]{3,24}', storage):
         raise ValueError('STREAM_STORAGE_ACCOUNT must be 3-24 lowercase letters or digits')
-    for name in (namespace, app_name):
+    for name in ((namespace, app_name) if transport == 'eventhub' else (app_name,)):
         if not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9-]{4,48}[a-zA-Z0-9]', name):
             raise ValueError('Use 6-50 letters, digits or hyphens for the namespace and Function App names')
     sources = {key: os.getenv(key, default).strip() for key, (default, _) in SOURCE_DEFAULTS.items()}
@@ -127,6 +185,7 @@ def provision_stream(event_app_dir: Path):
 
     cli = AzureCLI(subscription)
     cli.run('account', 'show')
+    grid_config = grid_configuration(cli) if transport == 'eventgrid' else None
     cosmos_args = ['--resource-group', cosmos_group, '--account-name', cosmos_account]
     account = cli.run('cosmosdb', 'show', '--resource-group', cosmos_group, '--name', cosmos_account)
     if account['documentEndpoint'].rstrip('/').replace(':443', '') != endpoint.rstrip('/').replace(':443', ''):
@@ -159,20 +218,29 @@ def provision_stream(event_app_dir: Path):
     else:
         cli.run('group', 'create', '--name', group, '--location', location)
 
-    namespace_resource = ensure_named(cli, 'Event Hubs namespace',
-        ['eventhubs', 'namespace', 'list', *group_args],
-        ['eventhubs', 'namespace', 'create', *group_args, '--name', namespace,
-         '--location', location, '--sku', 'Standard', '--capacity', '1'], namespace)
-    if namespace_resource.get('sku', {}).get('name') not in {'Standard', 'Premium', 'Dedicated'}:
-        raise ValueError('The Event Hubs namespace must support a dedicated consumer group (Standard or higher)')
-    namespace_args = [*group_args, '--namespace-name', namespace]
-    hub_resource = ensure_named(cli, 'Event Hub',
-        ['eventhubs', 'eventhub', 'list', *namespace_args],
-        ['eventhubs', 'eventhub', 'create', *namespace_args, '--name', hub, '--partition-count', '2'], hub)
-    ensure_named(cli, 'consumer group',
-        ['eventhubs', 'eventhub', 'consumer-group', 'list', *namespace_args, '--eventhub-name', hub],
-        ['eventhubs', 'eventhub', 'consumer-group', 'create', *namespace_args,
-         '--eventhub-name', hub, '--name', consumer], consumer)
+    if transport == 'eventgrid':
+        transport_resource, transport_settings, transport_roles = ensure_grid_topic(cli, grid_config)
+    else:
+        namespace_resource = ensure_named(cli, 'Event Hubs namespace',
+            ['eventhubs', 'namespace', 'list', *group_args],
+            ['eventhubs', 'namespace', 'create', *group_args, '--name', namespace,
+             '--location', location, '--sku', 'Standard', '--capacity', '1'], namespace)
+        if namespace_resource.get('sku', {}).get('name') not in {'Standard', 'Premium', 'Dedicated'}:
+            raise ValueError('The Event Hubs namespace must support a dedicated consumer group (Standard or higher)')
+        namespace_args = [*group_args, '--namespace-name', namespace]
+        transport_resource = ensure_named(cli, 'Event Hub',
+            ['eventhubs', 'eventhub', 'list', *namespace_args],
+            ['eventhubs', 'eventhub', 'create', *namespace_args, '--name', hub, '--partition-count', '2'], hub)
+        ensure_named(cli, 'consumer group',
+            ['eventhubs', 'eventhub', 'consumer-group', 'list', *namespace_args, '--eventhub-name', hub],
+            ['eventhubs', 'eventhub', 'consumer-group', 'create', *namespace_args,
+             '--eventhub-name', hub, '--name', consumer], consumer)
+        transport_roles = ['2b629674-e913-4c01-ae53-ef4638d8f975', 'a638d3c7-ab3a-418d-83e6-5f17a39d4fde']
+        transport_settings = {'STREAM_TRANSPORT': 'eventhub',
+            'EVENT_HUB_NAMESPACE': namespace + '.servicebus.windows.net',
+            'EVENT_HUB_CONNECTION__fullyQualifiedNamespace': namespace + '.servicebus.windows.net',
+            'EVENT_HUB_CONNECTION__credential': 'managedidentity',
+            'EVENT_HUB_NAME': hub, 'EVENT_HUB_CONSUMER_GROUP': consumer}
     storage_resource = ensure_named(cli, 'Function storage account',
         ['storage', 'account', 'list', *group_args],
         ['storage', 'account', 'create', *group_args, '--name', storage, '--location', location,
@@ -201,8 +269,8 @@ def provision_stream(event_app_dir: Path):
     app_args = [*group_args, '--name', app_name]
     identity = cli.run('functionapp', 'identity', 'assign', *app_args)
     principal = identity['principalId']
-    grant_role(cli, principal, '2b629674-e913-4c01-ae53-ef4638d8f975', hub_resource['id'])  # Sender
-    grant_role(cli, principal, 'a638d3c7-ab3a-418d-83e6-5f17a39d4fde', hub_resource['id'])  # Receiver
+    for role in transport_roles:
+        grant_role(cli, principal, role, transport_resource['id'])
     assignments = cli.run('cosmosdb', 'sql', 'role', 'assignment', 'list', *cosmos_args)
     permissions = [(name, '00000000-0000-0000-0000-000000000001') for name in sorted(set(sources.values()))]
     permissions += [(name, '00000000-0000-0000-0000-000000000002') for name in leases.values()]
@@ -219,10 +287,7 @@ def provision_stream(event_app_dir: Path):
 
     settings = {'COSMOS_CONNECTION__accountEndpoint': endpoint, 'COSMOS_DATABASE': database,
                 'COSMOS_CONNECTION__credential': 'managedidentity',
-                'EVENT_HUB_NAMESPACE': namespace + '.servicebus.windows.net',
-                'EVENT_HUB_CONNECTION__fullyQualifiedNamespace': namespace + '.servicebus.windows.net',
-                'EVENT_HUB_CONNECTION__credential': 'managedidentity',
-                'EVENT_HUB_NAME': hub, 'EVENT_HUB_CONSUMER_GROUP': consumer,
+                **transport_settings,
                 'NORA_LOG_LEVEL': os.getenv('NORA_LOG_LEVEL', 'INFO'), **sources, **leases}
     current = {item['name']: item['value'] for item in cli.run('functionapp', 'config', 'appsettings', 'list', *app_args)}
     changes = [f'{key}={value}' for key, value in settings.items() if current.get(key) != value]
@@ -251,7 +316,7 @@ def provision_stream(event_app_dir: Path):
                 '--tags', f'nora-package-sha256={package_hash}')
     functions = cli.run('functionapp', 'function', 'list', *app_args)
     expected = {'chat_history_changes', 'tool_history_changes', 'context_history_changes',
-                'feedback_changes', 'nora_update_subscriber'}
+                'feedback_changes', 'nora_grid_subscriber' if transport == 'eventgrid' else 'nora_update_subscriber'}
     registered = {item['name'].split('/')[-1] for item in functions}
     if expected - registered:
         LOGGER.warning('Deployment submitted, but these functions are not registered yet: %s. '
