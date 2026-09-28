@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
+from intent_app import label_records, SAMPLE_INTENTS
+from interaction_report import FIELDS as REPORT_FIELDS, report_row
 from interaction_reader import (
     find_values, get_interaction as read_interaction,
     query, query_chat, query_feedback, remove_duplicates,
@@ -29,30 +31,93 @@ INGESTION_MODE = os.getenv("INGESTION_MODE", "none").lower()
 BATCH_LIMIT = int(os.getenv("BATCH_LIMIT", "0"))
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "100"))
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "10"))
+INTERACTION_SAMPLING_ENABLED = os.getenv("INTERACTION_SAMPLING_ENABLED", "false").lower() == "true"
+INTERACTION_SAMPLES_PER_INTENT = int(os.getenv("INTERACTION_SAMPLES_PER_INTENT", "100"))
 
 
+
+
+def classify_interaction(interaction):
+    # Context records carry the same requests used by intent_app. Fall back to
+    # chat history when no agent context was returned for this conversation.
+    source_name = "context_history" if interaction["context_history"] else "chat_history"
+    records = [dict(record, id=str(index), conversation_id=interaction["interaction_id"])
+               for index, record in enumerate(interaction[source_name])]
+    labels = label_records(records)
+    by_index = {label["source_id"]: label["classification.intent"] for label in labels}
+    intents = list(dict.fromkeys(label["classification.intent"] for label in labels))
+    return source_name, by_index, intents
+
+
+class InteractionSampler:
+    """Count successfully exported unique CIDs, not source rows or tool calls."""
+
+    def __init__(self, limit):
+        if limit < 1:
+            raise ValueError("INTERACTION_SAMPLES_PER_INTENT must be positive")
+        self.limit = limit
+        self.counts = dict.fromkeys(SAMPLE_INTENTS, 0)
+        self.saved = set()
+
+    def eligible(self, interaction):
+        if interaction["interaction_id"] in self.saved:
+            return []
+        return [intent for intent in classify_interaction(interaction)[2]
+                if intent in self.counts and self.counts[intent] < self.limit]
+
+    def record_saved(self, cid, intents):
+        if cid in self.saved:
+            return
+        self.saved.add(cid)
+        for intent in set(intents):
+            self.counts[intent] += 1
+
+    def full(self):
+        return all(count >= self.limit for count in self.counts.values())
+
+    def report(self):
+        path = os.path.join(OUTPUT_DIR, "interaction_sample_counts.csv")
+        with open(path, "w", encoding="utf-8", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["intent", "unique_interactions", "target", "shortfall"])
+            for intent, count in self.counts.items():
+                writer.writerow([intent, count, self.limit, self.limit - count])
+        print("Sample progress: " + ", ".join(f"{k}={v}/{self.limit}" for k, v in self.counts.items()), flush=True)
 
 
 def save_interaction_csv(interaction):
     path = os.path.join(OUTPUT_DIR, "interactions.csv")
-    fields = ["interaction_id", "cid", "run_id", "source", "record_id", "data"]
+    fields = [*REPORT_FIELDS, "intent_scope", "sample_intents"]
+    source_name, by_index, intents = classify_interaction(interaction)
+    conversation_intents = " | ".join(intents)
 
-    file_exists = os.path.exists(path)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    file_exists = os.path.exists(path) and os.path.getsize(path) > 0
+    if file_exists:
+        with open(path, encoding="utf-8-sig", newline="") as existing:
+            if next(csv.reader(existing), []) != fields:
+                raise ValueError("Existing interactions.csv has an older/different header. "
+                                 "Use a new OUTPUT_DIR or rename that CSV before running app.py.")
     with open(path, "a", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         if not file_exists:
             writer.writeheader()
 
         for source in ("chat_history", "tool_history", "context_history", "feedback"):
-            for record in interaction[source]:
-                writer.writerow({
+            for index, record in enumerate(interaction[source]):
+                metadata = {
                     "interaction_id": interaction["interaction_id"],
                     "cid": record.get("cid", ",".join(interaction["cids"])),
                     "run_id": record.get("run_id", ""),
-                    "source": source,
                     "record_id": record.get("id", ""),
-                    "data": json.dumps(record, ensure_ascii=False, default=str),
-                })
+                    "intent": by_index.get(str(index), "") if source == source_name else conversation_intents,
+                }
+                row = report_row(record, source, metadata)
+                # A CID alone cannot prove which request caused a tool call.
+                row["intent_scope"] = "record" if source == source_name else "conversation"
+                row["sample_intents"] = " | ".join(interaction.get("sample_intents", []))
+                writer.writerow(row)
+        file.flush()
 
 
 def first_value(data, names):
@@ -221,7 +286,19 @@ if __name__ == "__main__":
     if BATCH_LIMIT < 0 or BATCH_SIZE < 1 or MAX_WORKERS < 1:
         raise ValueError("BATCH_LIMIT must be >= 0; BATCH_SIZE and MAX_WORKERS must be > 0")
 
+    sampler = InteractionSampler(INTERACTION_SAMPLES_PER_INTENT) if INTERACTION_SAMPLING_ENABLED else None
+    if sampler is not None:
+        if sys.argv[1] not in ("--all", "--all-complete"):
+            raise ValueError("Interaction sampling requires --all or --all-complete")
+        if BATCH_LIMIT:
+            raise ValueError("Set BATCH_LIMIT=0 for per-intent sampling")
+        if any(os.path.exists(os.path.join(OUTPUT_DIR, name)) for name in
+               ("interactions.csv", "interactions.jsonl", "interaction_sample_counts.csv")):
+            raise ValueError("Sampling requires a fresh OUTPUT_DIR; existing exports are not resumed")
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    if sampler is not None:
+        sampler.report()
     credential = DefaultAzureCredential()
     client = CosmosClient(ENDPOINT, credential=credential)
     database = client.get_database_client(DATABASE)
@@ -265,7 +342,16 @@ if __name__ == "__main__":
 
             # Writes stay on the main thread so concurrent workers never write
             # to the same CSV/JSONL files at the same time.
+            if sampler is not None:
+                selected_intents = sampler.eligible(interaction)
+                if not selected_intents:
+                    skipped += 1
+                    continue
+                interaction["sample_intents"] = selected_intents
             save_interaction(interaction)
+            if sampler is not None:
+                sampler.record_saved(interaction_id, selected_intents)
+                sampler.report()
             success += 1
             batch_success += 1
             print(f"Processed {interaction_id}")
@@ -273,7 +359,12 @@ if __name__ == "__main__":
         if complete_only:
             missing = ", ".join(f"missing_{name}={count}" for name, count in missing_counts.items())
             print(f"Batch {batch_number}: complete={batch_success}, skipped={batch_skipped}, {missing}")
+        if sampler is not None and sampler.full():
+            print("All six interaction sample quotas reached.", flush=True)
+            break
 
     client.close()
     credential.close()
     print(f"Completed: {success} succeeded, {skipped} skipped, {failed} failed")
+    if sampler is not None:
+        sampler.report()
