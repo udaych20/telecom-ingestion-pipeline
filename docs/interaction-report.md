@@ -1,5 +1,13 @@
 # Agent and tool CSV report
 
+An explicit `rca_complete=true` now takes precedence over text rules (including
+active ticket state) and assigns `rca`, with rule `rca.completed_source_flag`.
+Boolean true and the string "true" are accepted on the document, its
+`conversation` object, or message/message-data metadata. False/missing values
+continue through existing rules; false alone does not force clarification.
+In `app.py`, a completed-RCA chat takes classification precedence over agent
+context so its flag is not missed. This does not relabel historical export files.
+
 ## Sample unique interactions per intent in app.py
 
 To restrict sampling to your supplied CIDs, also set these in `.env`:

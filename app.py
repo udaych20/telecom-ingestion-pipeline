@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
-from intent_app import label_records, SAMPLE_INTENTS, load_cids_from_csv
+from intent_app import label_records, SAMPLE_INTENTS, load_cids_from_csv, rca_completed
 from interaction_report import FIELDS as REPORT_FIELDS, report_row
 from interaction_reader import (
     find_values, get_interaction as read_interaction,
@@ -45,6 +45,10 @@ def classify_interaction(interaction):
     # Context records carry the same requests used by intent_app. Fall back to
     # chat history when no agent context was returned for this conversation.
     source_name = "context_history" if interaction["context_history"] else "chat_history"
+    # Do not overlook completion metadata stored on the chat document when
+    # agent records exist but do not carry that metadata themselves.
+    if any(rca_completed(record) for record in interaction["chat_history"]):
+        source_name = "chat_history"
     records = [dict(record, id=str(index), conversation_id=interaction["interaction_id"])
                for index, record in enumerate(interaction[source_name])]
     labels = label_records(records)

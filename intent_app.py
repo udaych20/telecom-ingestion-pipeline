@@ -310,6 +310,21 @@ def matches(text: str, patterns: Iterable[re.Pattern[str]]) -> bool:
     return any(pattern.search(text) for pattern in patterns)
 
 
+def rca_completed(record: dict[str, Any]) -> bool:
+    """Read explicit source metadata, not text mentioning an RCA flag."""
+    sources = [record, nested_dict(record)]
+    for messages in message_lists(record):
+        for message in messages:
+            if isinstance(message, dict):
+                sources.append(message)
+                if isinstance(message.get("data"), dict):
+                    sources.append(message["data"])
+    return any(source.get("rca_complete") is True or
+               (isinstance(source.get("rca_complete"), str) and
+                source["rca_complete"].strip().lower() == "true")
+               for source in sources)
+
+
 def classify(
     record: dict[str, Any],
     *,
@@ -317,6 +332,11 @@ def classify(
     prior_customer_context: bool = False,
 ) -> Prediction:
     """Classify one record using the documented first-match rule order."""
+    if rca_completed(record):
+        return Prediction(
+            "rca", 1.0, "rca.completed_source_flag",
+            "Source metadata explicitly marks rca_complete=true.", False,
+        )
     text = extract_user_text(record)
     issue = extract_issue(record)
     customer_context = has_customer_context(record, prior_customer_context)
