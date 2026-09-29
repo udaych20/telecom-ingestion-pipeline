@@ -12,13 +12,13 @@ class LargeViewerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / 'source.csv'
             index = Path(folder) / 'viewer.sqlite3'
-            fields = ['interaction_id', 'source', 'data', 'input', 'output']
+            fields = ['interaction_id', 'source', 'data', 'input', 'output', 'intent']
             large = 'quote" comma, newline\n日本語' * 4000
             with source.open('w', encoding='utf-8-sig', newline='') as file:
                 writer = csv.DictWriter(file, fieldnames=fields)
                 writer.writeheader()
                 for n in range(25):
-                    writer.writerow(dict(interaction_id='001', source='tool_history',
+                    writer.writerow(dict(interaction_id='001', source='tool_history', intent='rca' if n < 20 else 'query',
                                          data=json.dumps({'value': n}), input=large if n == 0 else '', output='done'))
             original = source.read_bytes()
             build_index(source, index)
@@ -36,6 +36,11 @@ class LargeViewerTests(unittest.TestCase):
             last = query_index(index, '/api/records', {'cid': ['001'], 'page': ['1']})
             self.assertEqual(len(last['rows']), 5)
             self.assertFalse(last['more'])
+            self.assertEqual(query_index(index, '/api/intents', {})['rows'], ['query', 'rca'])
+            filtered = query_index(index, '/api/records', {'cid': ['001'], 'intent': ['query']})
+            self.assertEqual(len(filtered['rows']), 5)
+            self.assertTrue(all(row['intent'] == 'query' for row in filtered['rows']))
+            self.assertEqual(query_index(index, '/api/cids', {'intent': ['missing']})['rows'], [])
             chunks, offset = [], 0
             while True:
                 part = query_index(index, '/api/text', {'id': ['1'], 'offset': [str(offset)]})
@@ -69,4 +74,5 @@ class LargeViewerTests(unittest.TestCase):
         self.assertIn('function renderContextHistory', page)
         self.assertIn('function renderFeedback', page)
         self.assertIn('Filter by source', page)
+        self.assertIn('Filter by intent', page)
         self.assertNotIn('file.stream()', page)

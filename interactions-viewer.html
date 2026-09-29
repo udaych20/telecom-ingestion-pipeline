@@ -11,7 +11,7 @@
     header { background:linear-gradient(120deg,#0f3d4c,#155e75); color:#fff; padding:28px max(24px,calc((100vw - 1440px)/2)); }
     header h1 { margin:0 0 5px; font-size:25px; }
     header p { margin:0; color:#d7eef4; }
-    .toolbar { max-width:1440px; margin:18px auto; padding:0 24px; display:grid; grid-template-columns:minmax(260px,1fr) 2fr auto; gap:12px; }
+    .toolbar { max-width:1440px; margin:18px auto; padding:0 24px; display:grid; grid-template-columns:minmax(260px,1fr) 2fr auto auto; gap:12px; }
     .pick,input,select,button { border:1px solid var(--line); border-radius:9px; background:var(--paper); padding:10px 12px; font:inherit; }
     .pick { cursor:pointer; text-align:center; color:var(--brand); font-weight:650; border-style:dashed; border-color:var(--accent); }
     .pick input { display:none; }
@@ -72,6 +72,7 @@
     <label class="pick">Choose interactions.csv<input id="file" type="file" accept=".csv,text/csv"></label>
     <input id="search" type="search" placeholder="Search IDs, messages, tools, feedback…" disabled>
     <select id="source" disabled aria-label="Filter by source"><option value="">All sources</option></select>
+    <select id="intent" disabled aria-label="Filter by intent"><option value="">All intents</option></select>
   </section>
   <section id="feedback-overview" class="feedback-overview"></section>
   <main id="app"><div class="empty"><strong>Choose the generated interactions.csv</strong><span>Everything stays in your browser; no data is uploaded.</span></div></main>
@@ -79,13 +80,13 @@
 (() => {
   const sourceLabels={chat_history:'Chat history',tool_history:'Tool history',context_history:'Context history (Agent)',feedback:'Feedback'};
   const preferred=['agent','function_name','function_arguments','function_result','user_content','user_message','query','issue','assistant_content','assistant_response','response','content','message','tool_name','name','arguments','result','error','rating','feedback','comment','created_at','timestamp','status'];
-  const state={groups:[],selected:null,query:'',source:''};
-  const app=document.querySelector('#app'),feedbackOverview=document.querySelector('#feedback-overview'),error=document.querySelector('#error'),search=document.querySelector('#search'),source=document.querySelector('#source'),fileInput=document.querySelector('#file');
+  const state={groups:[],selected:null,query:'',source:'',intent:''};
+  const app=document.querySelector('#app'),feedbackOverview=document.querySelector('#feedback-overview'),error=document.querySelector('#error'),search=document.querySelector('#search'),source=document.querySelector('#source'),intent=document.querySelector('#intent'),fileInput=document.querySelector('#file');
 
   fileInput.addEventListener('change',async e=>{
     const file=e.target.files[0];
     if(!file)return;
-    search.disabled=source.disabled=true;
+    search.disabled=source.disabled=intent.disabled=true;
     error.style.display='none';
     showLoading(file,0);
     try{
@@ -98,6 +99,7 @@
   });
   search.addEventListener('input',e=>{state.query=e.target.value.trim().toLowerCase();render();});
   source.addEventListener('change',e=>{state.source=e.target.value;render();});
+  intent.addEventListener('change',e=>{state.intent=e.target.value;render();});
 
   function showLoading(file,percent){
     const mb=(file.size/1024/1024).toFixed(1);
@@ -170,9 +172,11 @@
     for(const row of rows){const id=row.interaction_id||'(missing interaction ID)';if(!map.has(id))map.set(id,[]);map.get(id).push(row);}
     state.groups=[...map].map(([id,records])=>({id,records}));
     state.selected=state.groups[0]?.id;
-    search.disabled=source.disabled=false;
+    search.disabled=source.disabled=intent.disabled=false;
     const sources=[...new Set(rows.map(r=>r.source).filter(Boolean))];
     source.innerHTML='<option value="">All sources</option>'+sources.map(s=>`<option value="${esc(s)}">${esc(sourceLabels[s]||s)}</option>`).join('');
+    const intents=[...new Set(rows.map(r=>r.intent).filter(Boolean))].sort();
+    intent.innerHTML='<option value="">All intents</option>'+intents.map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join('');
     renderFeedbackOverview(rows);
     rows.length=0;
     render();
@@ -204,8 +208,8 @@
   }
 
   function render(){
-    const visible=state.groups.filter(groupMatches).filter(g=>!state.source||g.records.some(r=>r.source===state.source));
-    if(!visible.length){app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try a broader search or source filter.</span></div>';return;}
+    const visible=state.groups.filter(groupMatches).filter(g=>g.records.some(r=>(!state.source||r.source===state.source)&&(!state.intent||r.intent===state.intent)));
+    if(!visible.length){app.innerHTML='<div class="empty"><strong>No matching interactions</strong><span>Try a broader search, source, or intent filter.</span></div>';return;}
     if(!visible.some(g=>g.id===state.selected))state.selected=visible[0].id;
     const active=visible.find(g=>g.id===state.selected);
     app.innerHTML=`<aside><div class="aside-title">${visible.length} of ${state.groups.length} interactions</div>${visible.map(g=>`<button class="interaction ${g.id===active.id?'active':''}" data-id="${esc(g.id)}"><strong>${highlight(g.id)}</strong><small>${g.records.length} source record${g.records.length===1?'':'s'}</small></button>`).join('')}</aside><section class="content">${renderGroup(active)}</section>`;
@@ -213,7 +217,7 @@
   }
 
   function renderGroup(group){
-    const records=group.records.filter(r=>!state.source||r.source===state.source),counts={};
+    const records=group.records.filter(r=>(!state.source||r.source===state.source)&&(!state.intent||r.intent===state.intent)),counts={};
     group.records.forEach(r=>counts[r.source]=(counts[r.source]||0)+1);
     const sections=[...new Set(records.map(r=>r.source))].map(type=>`<h3>${esc(sourceLabels[type]||type)} <span class="pill">${records.filter(r=>r.source===type).length}</span></h3>${records.filter(r=>r.source===type).map(renderRecord).join('')}`).join('');
     return `<div class="title-row"><div><h2>${highlight(group.id)}</h2><div class="meta">${group.records.length} total source records</div></div><div class="stats">${Object.entries(counts).map(([k,v])=>`<span class="pill">${esc(sourceLabels[k]||k)}: ${v}</span>`).join('')}</div></div>${sections}`;
@@ -227,7 +231,7 @@
   }
 
   function renderRecord(row){
-    const parsed=parseRowJSON(row),id=row.record_id||parsed?.id||'Record',meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`].filter(Boolean);
+    const parsed=parseRowJSON(row),id=row.record_id||parsed?.id||'Record',meta=[row.cid&&`CID: ${row.cid}`,row.run_id&&`Run: ${row.run_id}`,row.intent&&`Intent: ${row.intent}`].filter(Boolean);
     let body='';
     if(parsed){
       if(row.source==='chat_history'&&Array.isArray(parsed.messages))body=renderChatMessages(parsed.messages);

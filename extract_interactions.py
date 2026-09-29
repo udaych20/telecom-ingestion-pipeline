@@ -1,7 +1,7 @@
-"""Stream a large interaction CSV into a small, event-oriented extract.
+"""Stream a large interaction CSV into a minimal, event-oriented extract.
 
-The output contains only CID, run ID, user input, agent call, tool call, and
-classification intent.  The input is processed one CSV record at a time, so
+The output contains only CID, user input, agent name, function name, and
+classification intent. The input is processed one CSV record at a time, so
 its size is not limited by available RAM.
 """
 
@@ -11,8 +11,7 @@ import json
 from pathlib import Path
 
 
-FIELDS = ["cid", "run_id", "user_input", "agent_call", "tool_call",
-          "classification_intent"]
+FIELDS = ["cid", "user_input", "agent", "function_name", "classification_intent"]
 HISTORIES = ("chat_history", "context_history", "tool_history")
 
 
@@ -74,26 +73,10 @@ def user_messages(record):
             yield fallback if isinstance(fallback, str) else json_cell(fallback)
 
 
-def call_summary(record, source):
-    arguments = first(record, "arguments", "function_arguments", "input")
-    result = first(record, "function_result", "result", "output")
-    summary = {}
-    if source == "context_history" and useful(record.get("agent")):
-        summary["agent"] = record["agent"]
-    for key, value in (("function_name", first(record, "function_name", "name")),
-                       ("arguments", arguments), ("result", result),
-                       ("error", record.get("error"))):
-        if useful(value):
-            summary[key] = value
-    return json_cell(summary) if summary else ""
-
-
 def output_rows(row):
     """Convert either an expanded interaction row or a wide enriched row."""
     intent = first(row, "classification_intent", "classification.intent", "intent")
     base_cid = first(row, "cid", "conversation_id", "interaction_id")
-    base_run = first(row, "run_id")
-
     if "source" in row and "data" in row:
         try:
             record = json.loads(row.get("data") or "{}")
@@ -116,21 +99,20 @@ def output_rows(row):
         if not isinstance(record, dict):
             raise ValueError(f"{source} record must be a JSON object")
         cid = base_cid or nested_first(record, ("cid", "conversation_id"))
-        run_id = first(record, "run_id") or base_run
-        common = {"cid": cid, "run_id": run_id, "user_input": "",
-                  "agent_call": "", "tool_call": "",
+        common = {"cid": cid, "user_input": "", "agent": "", "function_name": "",
                   "classification_intent": intent or first(record, "classification_intent", "intent")}
         if source == "chat_history":
             for message in user_messages(record):
                 yield {**common, "user_input": message}
         elif source == "context_history":
-            call = call_summary(record, source)
-            if call:
-                yield {**common, "agent_call": call}
+            agent = first(record, "agent")
+            function_name = first(record, "function_name", "name")
+            if useful(agent) or useful(function_name):
+                yield {**common, "agent": agent, "function_name": function_name}
         elif source == "tool_history":
-            call = call_summary(record, source)
-            if call:
-                yield {**common, "tool_call": call}
+            function_name = first(record, "function_name", "name")
+            if useful(function_name):
+                yield {**common, "function_name": function_name}
 
 
 def extract(source, destination, progress_every=100_000):

@@ -1,11 +1,11 @@
 const el=id=>document.getElementById(id);
 const sourceLabels={chat_history:'Chat history',context_history:'Context history (Agent)',tool_history:'Tool history',feedback:'Feedback'};
-let cidPage=0,rowPage=0,selected='',query='',source='',cidVersion=0,rowVersion=0;
+let cidPage=0,rowPage=0,selected='',query='',source='',intent='',cidVersion=0,rowVersion=0;
 async function api(path){const r=await fetch(path);if(!r.ok)throw Error(await r.text());return r.json()}
 function guarded(fn){return async()=>{try{error.style.display='none';await fn()}catch(e){showError(e.message)}}}
 async function conversations(){
  const version=++cidVersion;
- const data=await api('/api/cids?page='+cidPage+'&q='+encodeURIComponent(query));
+ const data=await api('/api/cids?page='+cidPage+'&q='+encodeURIComponent(query)+'&intent='+encodeURIComponent(intent));
  if(version!==cidVersion)return;
  el('cids').replaceChildren();el('cid-title').textContent='Conversations · page '+(cidPage+1);
  for(const row of data.rows){const b=document.createElement('button');b.className='interaction'+(row.cid===selected?' active':'');
@@ -20,7 +20,7 @@ async function records(){
  if(!selected)return;
  const version=++rowVersion;
  el('info').textContent='Loading records…';
- const data=await api('/api/records?cid='+encodeURIComponent(selected)+'&page='+rowPage+'&source='+encodeURIComponent(source));
+ const data=await api('/api/records?cid='+encodeURIComponent(selected)+'&page='+rowPage+'&source='+encodeURIComponent(source)+'&intent='+encodeURIComponent(intent));
  if(version!==rowVersion)return;
  el('selected').textContent=selected;
  el('stats').innerHTML=Object.entries(data.counts).map(([name,count])=>'<span class="pill">'+esc(sourceLabels[name]||name)+': '+count+'</span>').join('');
@@ -51,8 +51,9 @@ async function overview(){const data=await api('/api/overview');
 el('find').onclick=guarded(async()=>{query=el('search').value;cidPage=0;selected='';rowPage=0;++rowVersion;el('records').replaceChildren();await conversations()});
 el('search').onkeydown=e=>{if(e.key==='Enter')el('find').click()};
 el('source').onchange=guarded(async()=>{source=el('source').value;rowPage=0;await records()});
+el('intent').onchange=guarded(async()=>{intent=el('intent').value;cidPage=0;rowPage=0;selected='';++rowVersion;el('records').replaceChildren();await conversations()});
 el('prevCid').onclick=guarded(async()=>{cidPage=Math.max(0,cidPage-1);await conversations()});
 el('nextCid').onclick=guarded(async()=>{cidPage++;await conversations()});
 el('prevRow').onclick=guarded(async()=>{rowPage=Math.max(0,rowPage-1);await records()});
 el('nextRow').onclick=guarded(async()=>{rowPage++;await records()});
-guarded(async()=>{await Promise.all([conversations(),overview()])})();
+guarded(async()=>{const intents=await api('/api/intents');for(const value of intents.rows){const option=document.createElement('option');option.value=option.textContent=value;el('intent').append(option)}await Promise.all([conversations(),overview()])})();

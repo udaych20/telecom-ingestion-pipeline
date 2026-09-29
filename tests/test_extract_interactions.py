@@ -16,19 +16,21 @@ class ExtractInteractionsTests(unittest.TestCase):
         row = {"interaction_id": "c1", "run_id": "r1", "intent": "rca",
                "source": "chat_history", "data": json.dumps(chat)}
         self.assertEqual(list(output_rows(row))[0], {
-            "cid": "c1", "run_id": "r1", "user_input": "Why no signal?",
-            "agent_call": "", "tool_call": "", "classification_intent": "rca"})
+            "cid": "c1", "user_input": "Why no signal?", "agent": "",
+            "function_name": "", "classification_intent": "rca"})
 
         row.update(source="context_history", data=json.dumps({
             "agent": "Network", "function_name": "diagnose", "function_arguments": {"ban": "1"}}))
         agent = list(output_rows(row))[0]
-        self.assertEqual(json.loads(agent["agent_call"])["function_name"], "diagnose")
+        self.assertEqual(agent["agent"], "Network")
+        self.assertEqual(agent["function_name"], "diagnose")
 
         row.update(source="tool_history", data=json.dumps({
             "run_id": "r2", "function_name": "lookup", "arguments": {"x": 1}, "function_result": False}))
         tool = list(output_rows(row))[0]
-        self.assertEqual(tool["run_id"], "r2")
-        self.assertIs(json.loads(tool["tool_call"])["result"], False)
+        self.assertEqual(tool["function_name"], "lookup")
+        self.assertNotIn("run_id", tool)
+        self.assertNotIn("arguments", tool)
 
     def test_streaming_file_and_wide_format(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -44,8 +46,8 @@ class ExtractInteractionsTests(unittest.TestCase):
             self.assertEqual(extract(source, target, progress_every=0), 1)
             with target.open(encoding="utf-8-sig", newline="") as file:
                 result = next(csv.DictReader(file))
-            self.assertEqual(list(result), ["cid", "run_id", "user_input", "agent_call",
-                                            "tool_call", "classification_intent"])
+            self.assertEqual(list(result), ["cid", "user_input", "agent", "function_name",
+                                            "classification_intent"])
             self.assertEqual(result["user_input"], "status?")
 
 

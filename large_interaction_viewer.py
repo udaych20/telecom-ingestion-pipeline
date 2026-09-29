@@ -29,7 +29,8 @@ def viewer_page():
     <input id="search" placeholder="Search CID (not full-text)">
     <select id="source" aria-label="Filter by source"><option value="">All sources</option>
     <option value="chat_history">Chat history</option><option value="context_history">Context history (Agent)</option>
-    <option value="tool_history">Tool history</option><option value="feedback">Feedback</option></select></section>
+    <option value="tool_history">Tool history</option><option value="feedback">Feedback</option></select>
+    <select id="intent" aria-label="Filter by intent"><option value="">All intents</option></select></section>
     <section id="feedback-overview" class="feedback-overview" style="display:block"></section>
     <main><aside><div class="aside-title" id="cid-title">Conversations</div><div id="cids"></div>
     <button id="prevCid">Previous</button><button id="nextCid">Next</button></aside>
@@ -141,23 +142,32 @@ def query_index(index, route, params):
             return {'text': row[0], 'next': offset + len(row[0]), 'more': offset + len(row[0]) < row[1]}
         page = max(0, int(value('page', '0')))
         if route == '/api/cids':
-            rows = db.execute("SELECT cid,count FROM conversations WHERE instr(cid,?)>0 ORDER BY cid LIMIT ? OFFSET ?",
-                              (value('q'), PAGE_SIZE + 1, page * PAGE_SIZE)).fetchall()
+            rows = db.execute("SELECT c.cid,COUNT(r.id) count FROM conversations c JOIN records r ON r.cid=c.cid "
+                              "WHERE instr(c.cid,?)>0 AND (?='' OR r.intent=?) "
+                              "GROUP BY c.cid ORDER BY c.cid LIMIT ? OFFSET ?",
+                              (value('q'), value('intent'), value('intent'), PAGE_SIZE + 1,
+                               page * PAGE_SIZE)).fetchall()
         elif route == '/api/records':
             rows = db.execute("SELECT id,substr(source,1,200) source,substr(record_id,1,200) record_id,"
                               "substr(intent,1,500) intent,substr(agent,1,500) agent,"
                               "substr(function_name,1,500) function_name,substr(run_id,1,200) run_id,"
                               "CASE WHEN length(payload)<=? THEN payload ELSE NULL END preview "
-                              "FROM records WHERE cid=? AND (?='' OR source=?) ORDER BY id LIMIT ? OFFSET ?",
-                              (PREVIEW_LIMIT, value('cid'), value('source'), value('source'), PAGE_SIZE + 1, page * PAGE_SIZE)).fetchall()
+                              "FROM records WHERE cid=? AND (?='' OR source=?) AND (?='' OR intent=?) "
+                              "ORDER BY id LIMIT ? OFFSET ?",
+                              (PREVIEW_LIMIT, value('cid'), value('source'), value('source'),
+                               value('intent'), value('intent'), PAGE_SIZE + 1, page * PAGE_SIZE)).fetchall()
             result = []
             for row in rows[:PAGE_SIZE]:
                 item = dict(row)
                 preview = item.pop('preview')
                 item['preview'] = json.loads(preview) if preview is not None else None
                 result.append(item)
-            counts = dict(db.execute("SELECT source,count(*) FROM records WHERE cid=? GROUP BY source", (value('cid'),)).fetchall())
+            counts = dict(db.execute("SELECT source,count(*) FROM records WHERE cid=? AND (?='' OR intent=?) GROUP BY source",
+                                     (value('cid'), value('intent'), value('intent'))).fetchall())
             return {'rows': result, 'more': len(rows) > PAGE_SIZE, 'counts': counts}
+        elif route == '/api/intents':
+            rows = db.execute("SELECT DISTINCT intent FROM records WHERE intent<>'' ORDER BY intent").fetchall()
+            return {'rows': [row[0] for row in rows]}
         elif route == '/api/overview':
             # Feedback counts use the same convention as the original viewer:
             # non-empty negative feedback means negative; otherwise positive.
