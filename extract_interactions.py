@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 FIELDS = ["cid", "user_input", "agent", "function_name", "classification_intent"]
+AUDIT_FIELDS = ["cid", "status", "event_count"]
 HISTORIES = ("chat_history", "context_history", "tool_history")
 
 
@@ -133,7 +134,19 @@ def output_rows(row):
                 yield {**common, "function_name": function_name}
 
 
-def extract(source, destination, progress_every=100_000, selected_cids=None):
+def write_cid_audit(path, selected_cids, event_counts):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=AUDIT_FIELDS)
+        writer.writeheader()
+        for cid in sorted(selected_cids):
+            count = event_counts.get(cid, 0)
+            writer.writerow({"cid": cid, "status": "found" if count else "not_found",
+                             "event_count": count})
+
+
+def extract(source, destination, progress_every=100_000, selected_cids=None, cid_audit=None):
     source, destination = Path(source), Path(destination)
     selected_cids = ({normalize_cid(cid) for cid in selected_cids}
                      if selected_cids is not None else None)
@@ -143,6 +156,12 @@ def extract(source, destination, progress_every=100_000, selected_cids=None):
             raise ValueError("CID filter contains no non-empty CIDs")
     if source.resolve() == destination.resolve():
         raise ValueError("Output must differ from input")
+    if cid_audit is not None:
+        cid_audit = Path(cid_audit)
+        if cid_audit.resolve() in {source.resolve(), destination.resolve()}:
+            raise ValueError("CID audit must differ from input and output")
+        if selected_cids is None:
+            raise ValueError("CID audit requires --cid or --cid-csv")
     csv.field_size_limit(2**31 - 1)
     with source.open(encoding="utf-8-sig", newline="") as incoming:
         reader = csv.DictReader(incoming)
@@ -156,7 +175,7 @@ def extract(source, destination, progress_every=100_000, selected_cids=None):
             writer = csv.DictWriter(outgoing, fieldnames=FIELDS, extrasaction="ignore")
             writer.writeheader()
             written = 0
-            matched_cids = set()
+            event_counts = {}
             for number, row in enumerate(reader, 1):
                 if progress_every and number % progress_every == 0:
                     outgoing.flush()
@@ -175,11 +194,14 @@ def extract(source, destination, progress_every=100_000, selected_cids=None):
                         writer.writerow(result)
                         written += 1
                         if selected_cids is not None:
-                            matched_cids.add(result_cid)
+                            event_counts[result_cid] = event_counts.get(result_cid, 0) + 1
                 except (TypeError, ValueError) as error:
                     raise ValueError(f"Invalid input at CSV record {number + 1}; partial output retained") from error
     if selected_cids is not None:
-        print(f"Matched {len(matched_cids):,} of {len(selected_cids):,} requested CIDs", flush=True)
+        print(f"Matched {len(event_counts):,} of {len(selected_cids):,} requested CIDs", flush=True)
+        if cid_audit is not None:
+            write_cid_audit(cid_audit, selected_cids, event_counts)
+            print(f"Saved CID audit: {cid_audit.resolve()}", flush=True)
     print(f"Saved {written:,} events: {destination.resolve()}", flush=True)
     return written
 
@@ -194,13 +216,16 @@ def main():
                         help="Small CSV containing CIDs to include")
     parser.add_argument("--cid-column", default="cid",
                         help="CID CSV column name (default: cid)")
+    parser.add_argument("--cid-audit", type=Path,
+                        help="New CSV listing each requested CID as found or not_found")
     parser.add_argument("--progress-every", type=int, default=100_000)
     args = parser.parse_args()
     selected_cids = set(args.cid)
     if args.cid_csv:
         selected_cids.update(load_cids(args.cid_csv, args.cid_column))
     extract(args.input, args.output, args.progress_every,
-            selected_cids=selected_cids if args.cid or args.cid_csv else None)
+            selected_cids=selected_cids if args.cid or args.cid_csv else None,
+            cid_audit=args.cid_audit)
 
 
 if __name__ == "__main__":

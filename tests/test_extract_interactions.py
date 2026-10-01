@@ -55,6 +55,7 @@ class ExtractInteractionsTests(unittest.TestCase):
             source = Path(folder) / "interactions.csv"
             cid_file = Path(folder) / "cids.csv"
             target = Path(folder) / "compact.csv"
+            audit = Path(folder) / "audit.csv"
             with source.open("w", encoding="utf-8", newline="") as file:
                 writer = csv.DictWriter(file, fieldnames=["interaction_id", "source", "data", "intent"])
                 writer.writeheader()
@@ -67,14 +68,20 @@ class ExtractInteractionsTests(unittest.TestCase):
                 writer.writeheader()
                 writer.writerow({"conversation_id": " c2 "})
                 writer.writerow({"conversation_id": "c2"})
+                writer.writerow({"conversation_id": "c4"})
 
             selected = load_cids(cid_file, "conversation_id")
-            self.assertEqual(selected, {"c2"})
-            self.assertEqual(extract(source, target, progress_every=0, selected_cids=selected), 1)
+            self.assertEqual(selected, {"c2", "c4"})
+            self.assertEqual(extract(source, target, progress_every=0, selected_cids=selected,
+                                     cid_audit=audit), 1)
             with target.open(encoding="utf-8-sig", newline="") as file:
                 rows = list(csv.DictReader(file))
             self.assertEqual(rows[0]["cid"], "c2")
             self.assertEqual(rows[0]["function_name"], "tool-c2")
+            with audit.open(encoding="utf-8-sig", newline="") as file:
+                audit_rows = {row["cid"]: row for row in csv.DictReader(file)}
+            self.assertEqual(audit_rows["c2"], {"cid": "c2", "status": "found", "event_count": "1"})
+            self.assertEqual(audit_rows["c4"], {"cid": "c4", "status": "not_found", "event_count": "0"})
 
     def test_rejects_missing_cid_column(self):
         with tempfile.TemporaryDirectory() as folder:
