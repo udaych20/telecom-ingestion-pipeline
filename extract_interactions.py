@@ -31,6 +31,24 @@ def first(mapping, *names):
     return ""
 
 
+def normalize_cid(value):
+    return str(value).strip() if value is not None else ""
+
+
+def load_cids(path, column="cid"):
+    """Load a de-duplicated CID allowlist from a small CSV file."""
+    path = Path(path)
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        if column not in (reader.fieldnames or []):
+            raise ValueError(f"CID CSV has no {column!r} column")
+        cids = {normalize_cid(row.get(column)) for row in reader}
+    cids.discard("")
+    if not cids:
+        raise ValueError("CID CSV contains no non-empty CIDs")
+    return cids
+
+
 def nested_first(value, names):
     if isinstance(value, dict):
         for name in names:
@@ -115,8 +133,14 @@ def output_rows(row):
                 yield {**common, "function_name": function_name}
 
 
-def extract(source, destination, progress_every=100_000):
+def extract(source, destination, progress_every=100_000, selected_cids=None):
     source, destination = Path(source), Path(destination)
+    selected_cids = ({normalize_cid(cid) for cid in selected_cids}
+                     if selected_cids is not None else None)
+    if selected_cids is not None:
+        selected_cids.discard("")
+        if not selected_cids:
+            raise ValueError("CID filter contains no non-empty CIDs")
     if source.resolve() == destination.resolve():
         raise ValueError("Output must differ from input")
     csv.field_size_limit(2**31 - 1)
@@ -132,16 +156,30 @@ def extract(source, destination, progress_every=100_000):
             writer = csv.DictWriter(outgoing, fieldnames=FIELDS, extrasaction="ignore")
             writer.writeheader()
             written = 0
+            matched_cids = set()
             for number, row in enumerate(reader, 1):
-                try:
-                    for result in output_rows(row):
-                        writer.writerow(result)
-                        written += 1
-                except (TypeError, ValueError) as error:
-                    raise ValueError(f"Invalid input at CSV record {number + 1}; partial output retained") from error
                 if progress_every and number % progress_every == 0:
                     outgoing.flush()
                     print(f"Read {number:,} rows; wrote {written:,} events", flush=True)
+                row_cid = normalize_cid(first(row, "cid", "conversation_id", "interaction_id"))
+                # Expanded interaction exports carry the CID outside the large JSON
+                # cell, so irrelevant records can be skipped without decoding it.
+                if selected_cids is not None and row_cid and row_cid not in selected_cids:
+                    continue
+                try:
+                    for result in output_rows(row):
+                        result_cid = normalize_cid(result.get("cid"))
+                        if selected_cids is not None and result_cid not in selected_cids:
+                            continue
+                        result["cid"] = result_cid
+                        writer.writerow(result)
+                        written += 1
+                        if selected_cids is not None:
+                            matched_cids.add(result_cid)
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"Invalid input at CSV record {number + 1}; partial output retained") from error
+    if selected_cids is not None:
+        print(f"Matched {len(matched_cids):,} of {len(selected_cids):,} requested CIDs", flush=True)
     print(f"Saved {written:,} events: {destination.resolve()}", flush=True)
     return written
 
@@ -150,9 +188,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="Large interactions CSV")
     parser.add_argument("--output", type=Path, required=True, help="New compact CSV path")
+    parser.add_argument("--cid", action="append", default=[],
+                        help="Include one CID; repeat for multiple CIDs")
+    parser.add_argument("--cid-csv", type=Path,
+                        help="Small CSV containing CIDs to include")
+    parser.add_argument("--cid-column", default="cid",
+                        help="CID CSV column name (default: cid)")
     parser.add_argument("--progress-every", type=int, default=100_000)
     args = parser.parse_args()
-    extract(args.input, args.output, args.progress_every)
+    selected_cids = set(args.cid)
+    if args.cid_csv:
+        selected_cids.update(load_cids(args.cid_csv, args.cid_column))
+    extract(args.input, args.output, args.progress_every,
+            selected_cids=selected_cids if args.cid or args.cid_csv else None)
 
 
 if __name__ == "__main__":
