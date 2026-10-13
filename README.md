@@ -30,6 +30,12 @@ manages its consumer checkpoint and retries failed invocations.
 
 ### Azure prerequisites
 
+Customer PII is recursively masked after Cosmos retrieval (after required
+CID/run-ID joins) and before classification or export. Correlation identifiers
+are replaced with stable tokens, while Cosmos metadata is retained for audit,
+so generated files must still be stored as sensitive data. Configure the same
+strong `PII_TOKENIZATION_KEY` in initial-load and live deployments.
+
 Before testing, create one Cosmos lease container per source container,
 partitioned by `/id`: `leases-chat`, `leases-tools`, `leases-context`, and
 `leases-feedback`. Grant the Function identity Cosmos read/change-feed access,
@@ -180,6 +186,12 @@ An existing **Event Grid namespace** is also supported with
 `STREAM_TRANSPORT=eventgrid`. The code publishes CloudEvents to an HTTP topic
 and uses a timer-based pull subscriber instead of an Event Hubs trigger.
 See [Event Grid live mode](docs/event-grid-stream.md) for setup and limitations.
+
+An existing **on-prem Kafka cluster** is supported with
+`STREAM_TRANSPORT=kafka`. Cosmos change-feed Functions publish the same compact,
+pseudonymized CloudEvent JSON to the configured Kafka topic. Kafka brokers and
+topics are not provisioned by this repository. See
+[Kafka live mode](docs/kafka-stream.md) for configuration and network requirements.
 
 The initial phase writes the classified export and intent counts. It also writes
 a dummy training manifest and log when `TRAINING_PLACEHOLDER_ENABLED=true`; this

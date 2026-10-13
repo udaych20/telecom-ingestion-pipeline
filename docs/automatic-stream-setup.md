@@ -8,6 +8,8 @@ This creates billable resources. It is disabled by default.
 This page describes `STREAM_TRANSPORT=eventhub`. For your existing Event Grid
 namespace, use `STREAM_TRANSPORT=eventgrid` and follow
 [Event Grid live mode](event-grid-stream.md); it needs no Event Hubs resources.
+For an existing on-prem Kafka cluster, use `STREAM_TRANSPORT=kafka` and follow
+[Kafka live mode](kafka-stream.md).
 
 ## Configuration
 

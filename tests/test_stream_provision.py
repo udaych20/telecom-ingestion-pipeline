@@ -23,6 +23,7 @@ ENV = {
     'EVENT_HUB_CONSUMER_GROUP': 'subscriber',
     'STREAM_STORAGE_ACCOUNT': 'norastreamstorage',
     'STREAM_FUNCTION_APP': 'nora-stream-functions',
+    'PII_TOKENIZATION_KEY': 'test-tokenization-key',
 }
 APP_DIR = Path(__file__).resolve().parents[1] / 'event_app'
 
@@ -137,6 +138,28 @@ class ProvisionTests(unittest.TestCase):
         with patch.dict(os.environ, grid_env), patch('stream_provision.AzureCLI', return_value=fake):
             with self.assertRaisesRegex(ValueError, 'Queue'):
                 provision_stream(APP_DIR)
+
+    def test_kafka_reuses_existing_cluster_without_azure_transport_resources(self):
+        fake = FakeAzure()
+        kafka_env = {
+            'STREAM_TRANSPORT': 'kafka',
+            'KAFKA_BOOTSTRAP_SERVERS': 'broker-1.internal:9093,broker-2.internal:9093',
+            'KAFKA_TOPIC': 'nora-updates',
+            'KAFKA_SECURITY_PROTOCOL': 'SASL_SSL',
+            'KAFKA_SASL_MECHANISM': 'SCRAM-SHA-512',
+            'KAFKA_SASL_USERNAME': 'nora',
+            'KAFKA_SASL_PASSWORD': 'secret',
+            'EVENT_HUB_NAMESPACE': '',
+            'EVENT_HUB_NAME': '',
+            'EVENT_HUB_CONSUMER_GROUP': '',
+        }
+        with patch.dict(os.environ, kafka_env), patch('stream_provision.AzureCLI', return_value=fake):
+            provision_stream(APP_DIR)
+
+        self.assertFalse(any(call[0] in {'eventhubs', 'eventgrid'} for call in fake.calls))
+        self.assertEqual(fake.settings['STREAM_TRANSPORT'], 'kafka')
+        self.assertEqual(fake.settings['KAFKA_TOPIC'], 'nora-updates')
+        self.assertNotIn('EVENT_HUB_NAME', fake.settings)
 
     def test_grid_namespace_failure_has_no_creations_or_hub_fallback(self):
         fake = FakeAzure()

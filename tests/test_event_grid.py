@@ -98,6 +98,19 @@ class EventGridTests(unittest.TestCase):
         self.assertEqual(client.call_args.kwargs['namespace_topic'], 'updates')
         client.return_value.send.assert_called_once_with(self.event)
 
+    def test_event_contains_only_pseudonymized_operational_identifiers(self):
+        event = self.module.build_event(
+            'chat', {'id': 'customer-document', '_etag': 'version', 'cid': '15551234567',
+                     'run_id': 'internal-run-42'}
+        )
+        serialized = str(event)
+        self.assertNotIn('customer-document', serialized)
+        self.assertNotIn('15551234567', serialized)
+        self.assertNotIn('internal-run-42', serialized)
+        self.assertTrue(event['subject'].startswith('tok_'))
+        self.assertTrue(event['data']['cids'][0].startswith('tok_'))
+        self.assertTrue(event['data']['run_ids'][0].startswith('tok_'))
+
     def test_transport_selection(self):
         with patch.object(self.module, 'EventGridPublisher') as grid, patch.object(self.module, 'EventHubPublisher') as hub:
             self.module.get_publisher()

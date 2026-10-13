@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from interaction_reader import get_interaction
 from intent_app import attach_interactions, write_interaction_output
+from pii_masking import tokenize_identifier
 
 
 class InteractionTests(unittest.TestCase):
@@ -75,8 +76,9 @@ class InteractionTests(unittest.TestCase):
             database, "cid-1", chat_container="chat", context_container="context",
             tools_container="tools", feedback_container="feedback",
         )
-        self.assertEqual(result["tool_history"], records["tools"])
-        self.assertEqual(result["context_history"], records["context"])
+        self.assertEqual(result["tool_history"][0]["run_id"], tokenize_identifier("cid-1"))
+        self.assertEqual(result["context_history"][0]["run_id"], tokenize_identifier("cid-1"))
+        self.assertEqual(result["tool_history"][0]["tool_calls"], [{"name": "lookup"}])
         for name in ("context", "tools"):
             args, kwargs = containers[name].query_items.call_args
             self.assertIn("c.run_id = @value", args[0])

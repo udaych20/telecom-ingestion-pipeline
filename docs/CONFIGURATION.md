@@ -43,6 +43,8 @@ Do not place client secrets, access tokens, or Cosmos account keys in `.env`. `D
 | `VALIDATION_PERCENT` | `10` | CID-level validation split percentage |
 | `TEST_PERCENT` | `10` | CID-level test split percentage |
 | `FEATURE_REDACT_PII` | `true` | Mask common email, phone/account, and device identifiers |
+| `PII_TOKENIZATION_KEY` | None | Strong secret for stable pseudonyms; use the same Key Vault-backed value in initial and live modes |
+| `PII_ADDITIONAL_SENSITIVE_FIELDS` | None | Comma-separated proprietary telecom field names to redact |
 | `FEATURE_EXCLUDE_NEEDS_REVIEW` | `true` | Exclude classifications marked for human review |
 | `FEATURE_REQUIRE_REVIEWED_LABELS` | `false` | Require an explicit approved/accepted review marker |
 | `FOUNDRY_TRAINING_ENABLED` | `false` | Upload datasets and submit a paid Foundry fine-tuning job |

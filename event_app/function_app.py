@@ -1,8 +1,8 @@
-"""Publish NORA Cosmos DB changes to the configured Azure event transport.
+"""Publish NORA Cosmos DB changes to the configured live transport.
 
 The Cosmos trigger is backed by the change feed, so inserts and updates are
-published automatically.  Source documents are deliberately not copied to the
-event hub; only identifiers needed by subscribers are included.
+published automatically. Source documents are not copied to the transport;
+only identifiers needed by downstream consumers are included.
 """
 
 from __future__ import annotations
@@ -16,14 +16,15 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 import azure.functions as func
+from pii_masking import tokenize_identifier
 
 
 LOGGER = logging.getLogger("nora.event_app")
 LOGGER.setLevel(os.getenv("NORA_LOG_LEVEL", "INFO").upper())
 DATABASE_NAME = os.getenv("COSMOS_DATABASE", "NORA")
 STREAM_TRANSPORT = os.getenv("STREAM_TRANSPORT", "eventhub").strip().lower()
-if STREAM_TRANSPORT not in {"eventhub", "eventgrid"}:
-    raise ValueError("STREAM_TRANSPORT must be eventhub or eventgrid")
+if STREAM_TRANSPORT not in {"eventhub", "eventgrid", "kafka"}:
+    raise ValueError("STREAM_TRANSPORT must be eventhub, eventgrid, or kafka")
 
 app = func.FunctionApp()
 
@@ -85,6 +86,54 @@ class EventGridPublisher:
         LOGGER.info("Event Grid accepted event id=%s", event["id"])
 
 
+class KafkaPublisher:
+    """Publish compact change events to an existing Kafka topic."""
+
+    def __init__(self):
+        from kafka import KafkaProducer
+
+        protocol = os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL").strip().upper()
+        if protocol not in {"PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"}:
+            raise ValueError("KAFKA_SECURITY_PROTOCOL is not valid")
+
+        options = {
+            "bootstrap_servers": split_setting("KAFKA_BOOTSTRAP_SERVERS"),
+            "client_id": os.getenv("KAFKA_CLIENT_ID", "nora-intent-finder").strip(),
+            "security_protocol": protocol,
+            "acks": "all",
+            "retries": int(os.getenv("KAFKA_RETRIES", "5")),
+            "request_timeout_ms": int(os.getenv("KAFKA_REQUEST_TIMEOUT_MS", "30000")),
+        }
+        if protocol.startswith("SASL"):
+            mechanism = os.getenv("KAFKA_SASL_MECHANISM", "PLAIN").strip().upper()
+            if mechanism not in {"PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"}:
+                raise ValueError("KAFKA_SASL_MECHANISM is not supported")
+            options.update(
+                sasl_mechanism=mechanism,
+                sasl_plain_username=required("KAFKA_SASL_USERNAME"),
+                sasl_plain_password=required("KAFKA_SASL_PASSWORD"),
+            )
+        ca_file = os.getenv("KAFKA_SSL_CAFILE", "").strip()
+        if ca_file:
+            options["ssl_cafile"] = ca_file
+
+        self._topic = required("KAFKA_TOPIC")
+        self._timeout = int(os.getenv("KAFKA_PUBLISH_TIMEOUT_SECONDS", "30"))
+        self._client = KafkaProducer(**options)
+        LOGGER.info("Kafka publisher initialized topic=%s", self._topic)
+
+    def publish(self, event, partition_key):
+        payload = json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        result = self._client.send(
+            self._topic,
+            key=partition_key.encode("utf-8"),
+            value=payload,
+            headers=[("content-type", b"application/cloudevents+json")],
+        )
+        result.get(timeout=self._timeout)
+        LOGGER.info("Kafka accepted event id=%s", event["id"])
+
+
 _publisher: Publisher | None = None
 _publisher_lock = threading.Lock()
 
@@ -96,13 +145,25 @@ def required(name: str) -> str:
     return value
 
 
+def split_setting(name: str) -> list[str]:
+    values = [value.strip() for value in required(name).split(",") if value.strip()]
+    if not values:
+        raise ValueError(f"{name} must contain at least one value")
+    return values
+
+
 def get_publisher() -> Publisher:
     global _publisher
     if _publisher is None:
         with _publisher_lock:
             if _publisher is None:
                 LOGGER.debug("Creating %s publisher client", STREAM_TRANSPORT)
-                _publisher = EventGridPublisher() if STREAM_TRANSPORT == "eventgrid" else EventHubPublisher()
+                publishers = {
+                    "eventhub": EventHubPublisher,
+                    "eventgrid": EventGridPublisher,
+                    "kafka": KafkaPublisher,
+                }
+                _publisher = publishers[STREAM_TRANSPORT]()
     return _publisher
 
 
@@ -123,7 +184,11 @@ def find_values(value: Any, field: str) -> list[str]:
 def build_event(container: str, document: dict[str, Any]) -> dict[str, Any]:
     """Create a stable CloudEvents-style notification for one document version."""
     document_id = str(document.get("id", ""))
+    masked_document_id = tokenize_identifier(document_id) if document_id else ""
     etag = str(document.get("_etag", ""))
+    cids = [tokenize_identifier(value) for value in find_values(document, "cid")]
+    cid_lists = [tokenize_identifier(value) for value in find_values(document, "cid_list")]
+    run_ids = [tokenize_identifier(value) for value in find_values(document, "run_id")]
     identity = f"{DATABASE_NAME}:{container}:{document_id}:{etag}"
     if not document_id or not etag:
         identity = json.dumps(document, sort_keys=True, default=str)
@@ -139,24 +204,24 @@ def build_event(container: str, document: dict[str, Any]) -> dict[str, Any]:
         "id": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
         "source": f"/cosmos/{DATABASE_NAME}/{container}",
         "type": "com.nora.cosmos.document.created-or-updated",
-        "subject": document_id,
+        "subject": masked_document_id,
         "time": event_time,
         "datacontenttype": "application/json",
         "data": {
             "database": DATABASE_NAME,
             "container": container,
-            "document_id": document_id,
-            "etag": etag,
-            "cids": find_values(document, "cid"),
-            "cid_lists": find_values(document, "cid_list"),
-            "run_ids": find_values(document, "run_id"),
+            "document_id": masked_document_id,
+            "etag": tokenize_identifier(etag) if etag else "",
+            "cids": cids,
+            "cid_lists": cid_lists,
+            "run_ids": run_ids,
         },
     }
     LOGGER.debug(
         "Built event id=%s container=%s document_id=%s cids=%s run_ids=%s",
         event["id"],
         container,
-        document_id,
+        masked_document_id,
         event["data"]["cids"],
         event["data"]["run_ids"],
     )
@@ -311,7 +376,7 @@ if STREAM_TRANSPORT == "eventhub":
         connection="EVENT_HUB_CONNECTION",
         consumer_group=os.getenv("EVENT_HUB_CONSUMER_GROUP", "nora-update-subscriber"),
     )(nora_update_subscriber)
-else:
+elif STREAM_TRANSPORT == "eventgrid":
     @app.timer_trigger(schedule="*/15 * * * * *", arg_name="timer", run_on_startup=False, use_monitor=True)
     def nora_grid_subscriber(timer: func.TimerRequest) -> None:
         from azure.eventgrid import EventGridConsumerClient

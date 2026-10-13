@@ -13,11 +13,11 @@ Grant the Cosmos DB Built-in Data Reader role at the narrowest account, database
 - Never commit `.env`.
 - Do not use Cosmos account keys in this application.
 - Do not print credentials or tokens.
-- Store any future destination credentials in an approved secret manager.
+- Store `PII_TOKENIZATION_KEY` and destination credentials in an approved secret manager such as Key Vault.
 
 ## Personal data
 
-The examples include names, email addresses, device identifiers, telephone numbers, and interaction text. Treat all output as sensitive. Before LLM training:
+The examples include names, email addresses, device identifiers, telephone numbers, and interaction text. Records are recursively masked immediately after the Cosmos joins complete and before they reach classification or export code. CID, run, conversation, session, thread, interaction, and live-event document identifiers are replaced with stable tokens. Set the same strong `PII_TOKENIZATION_KEY` in initial-load and live deployments so tokens correlate without exposing plaintext. Add organization-specific telecom fields through `PII_ADDITIONAL_SENSITIVE_FIELDS`. Cosmos metadata remains available for audit, so output must still be handled as sensitive. Before LLM training:
 
 1. Establish a lawful and approved purpose.
 2. Remove or pseudonymize unnecessary identifiers.

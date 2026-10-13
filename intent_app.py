@@ -42,6 +42,7 @@ from azure.identity import DefaultAzureCredential
 from interaction_reader import get_interaction as read_interaction
 from pipeline_logging import LOGGER, configure_logging, progress
 from pipeline_auth import create_pipeline_credential, check_cosmos_authentication
+from pii_masking import mask_pii
 from resume_export import ResumeExport
 
 
@@ -555,7 +556,7 @@ def iter_records_for_cids(container, cids, start_time, end_time, batch_size):
             key = cosmos_record_key(record)
             if key not in seen:
                 seen.add(key)
-                yield record
+                yield mask_pii(record)
         LOGGER.info("CID query %s/%s completed; %s unique records fetched", index, len(cids), len(seen))
 
 
@@ -597,8 +598,8 @@ def iter_cosmos_records(
         return iter_records_for_cids(container, cids, start_time, end_time, batch_size)
     if start_time is None and end_time is None:
         if batch_size is None:
-            return container.read_all_items()
-        return container.read_all_items(max_item_count=batch_size)
+            return (mask_pii(item) for item in container.read_all_items())
+        return (mask_pii(item) for item in container.read_all_items(max_item_count=batch_size))
 
     filters: list[str] = []
     parameters: list[dict[str, Any]] = []
@@ -620,7 +621,7 @@ def iter_cosmos_records(
     }
     if batch_size is not None:
         query_options["max_item_count"] = batch_size
-    return container.query_items(**query_options)
+    return (mask_pii(item) for item in container.query_items(**query_options))
 
 
 def cosmos_record_key(record: dict[str, Any]) -> str:
@@ -658,7 +659,7 @@ def find_missing_cosmos_records(
     for item in items:
         inventory_count += 1
         if cosmos_record_key(item) not in exported_keys:
-            missing.append(item)
+            missing.append(mask_pii(item))
 
     return missing, inventory_count
 

@@ -22,7 +22,7 @@ SOURCE_DEFAULTS = {
     'COSMOS_CONTEXT_CONTAINER': ('context-history-uat', 'leases-context'),
     'COSMOS_FEEDBACK_CONTAINER': ('chat-feedback', 'leases-feedback'),
 }
-PACKAGE_FILES = ('function_app.py', 'host.json', 'requirements.txt')
+PACKAGE_FILES = ('function_app.py', 'host.json', 'requirements.txt', 'pii_masking.py')
 OWNER_TAG = 'nora-intent-stream'
 
 
@@ -40,6 +40,41 @@ def flag(name, default=False):
     if value not in {'true', 'false'}:
         raise ValueError(f'{name} must be true or false')
     return value == 'true'
+
+
+def package_path(event_app_dir, filename):
+    if filename == 'pii_masking.py':
+        return event_app_dir.parent / filename
+    return event_app_dir / filename
+
+
+def kafka_configuration():
+    """Validate settings for an existing Kafka cluster."""
+    protocol = os.getenv('KAFKA_SECURITY_PROTOCOL', 'SASL_SSL').strip().upper()
+    if protocol not in {'PLAINTEXT', 'SSL', 'SASL_PLAINTEXT', 'SASL_SSL'}:
+        raise ValueError('KAFKA_SECURITY_PROTOCOL is not valid')
+
+    settings = {
+        'STREAM_TRANSPORT': 'kafka',
+        'KAFKA_BOOTSTRAP_SERVERS': required('KAFKA_BOOTSTRAP_SERVERS'),
+        'KAFKA_TOPIC': required('KAFKA_TOPIC'),
+        'KAFKA_CLIENT_ID': os.getenv('KAFKA_CLIENT_ID', 'nora-intent-finder').strip(),
+        'KAFKA_SECURITY_PROTOCOL': protocol,
+        'KAFKA_RETRIES': os.getenv('KAFKA_RETRIES', '5').strip(),
+        'KAFKA_REQUEST_TIMEOUT_MS': os.getenv('KAFKA_REQUEST_TIMEOUT_MS', '30000').strip(),
+        'KAFKA_PUBLISH_TIMEOUT_SECONDS': os.getenv('KAFKA_PUBLISH_TIMEOUT_SECONDS', '30').strip(),
+    }
+    if protocol.startswith('SASL'):
+        mechanism = os.getenv('KAFKA_SASL_MECHANISM', 'PLAIN').strip().upper()
+        if mechanism not in {'PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512'}:
+            raise ValueError('KAFKA_SASL_MECHANISM is not supported')
+        settings['KAFKA_SASL_MECHANISM'] = mechanism
+        settings['KAFKA_SASL_USERNAME'] = required('KAFKA_SASL_USERNAME')
+        settings['KAFKA_SASL_PASSWORD'] = required('KAFKA_SASL_PASSWORD')
+    ca_file = os.getenv('KAFKA_SSL_CAFILE', '').strip()
+    if ca_file:
+        settings['KAFKA_SSL_CAFILE'] = ca_file
+    return settings
 
 
 class AzureCLI:
@@ -158,8 +193,8 @@ def provision_stream(event_app_dir: Path):
     database = required('COSMOS_DATABASE')
     endpoint = required('COSMOS_ENDPOINT')
     transport = os.getenv('STREAM_TRANSPORT', 'eventhub').strip().lower()
-    if transport not in {'eventhub', 'eventgrid'}:
-        raise ValueError('STREAM_TRANSPORT must be eventhub or eventgrid')
+    if transport not in {'eventhub', 'eventgrid', 'kafka'}:
+        raise ValueError('STREAM_TRANSPORT must be eventhub, eventgrid, or kafka')
     if transport == 'eventhub':
         namespace = required('EVENT_HUB_NAMESPACE').removesuffix('.servicebus.windows.net')
         hub = required('EVENT_HUB_NAME')
@@ -180,7 +215,7 @@ def provision_stream(event_app_dir: Path):
     if set(sources.values()) & set(leases.values()) or len(set(leases.values())) != len(leases):
         raise ValueError('Lease containers must be distinct from each other and from all source containers')
     for filename in PACKAGE_FILES:
-        if not (event_app_dir / filename).is_file():
+        if not package_path(event_app_dir, filename).is_file():
             raise ValueError(f'Missing Function deployment file: {filename}')
 
     cli = AzureCLI(subscription)
@@ -220,7 +255,7 @@ def provision_stream(event_app_dir: Path):
 
     if transport == 'eventgrid':
         transport_resource, transport_settings, transport_roles = ensure_grid_topic(cli, grid_config)
-    else:
+    elif transport == 'eventhub':
         namespace_resource = ensure_named(cli, 'Event Hubs namespace',
             ['eventhubs', 'namespace', 'list', *group_args],
             ['eventhubs', 'namespace', 'create', *group_args, '--name', namespace,
@@ -241,6 +276,10 @@ def provision_stream(event_app_dir: Path):
             'EVENT_HUB_CONNECTION__fullyQualifiedNamespace': namespace + '.servicebus.windows.net',
             'EVENT_HUB_CONNECTION__credential': 'managedidentity',
             'EVENT_HUB_NAME': hub, 'EVENT_HUB_CONSUMER_GROUP': consumer}
+    else:
+        transport_resource = None
+        transport_roles = []
+        transport_settings = kafka_configuration()
     storage_resource = ensure_named(cli, 'Function storage account',
         ['storage', 'account', 'list', *group_args],
         ['storage', 'account', 'create', *group_args, '--name', storage, '--location', location,
@@ -288,6 +327,10 @@ def provision_stream(event_app_dir: Path):
     settings = {'COSMOS_CONNECTION__accountEndpoint': endpoint, 'COSMOS_DATABASE': database,
                 'COSMOS_CONNECTION__credential': 'managedidentity',
                 **transport_settings,
+                'PII_TOKENIZATION_KEY': required('PII_TOKENIZATION_KEY'),
+                'PII_ADDITIONAL_SENSITIVE_FIELDS': os.getenv(
+                    'PII_ADDITIONAL_SENSITIVE_FIELDS', ''
+                ).strip(),
                 'NORA_LOG_LEVEL': os.getenv('NORA_LOG_LEVEL', 'INFO'), **sources, **leases}
     current = {item['name']: item['value'] for item in cli.run('functionapp', 'config', 'appsettings', 'list', *app_args)}
     changes = [f'{key}={value}' for key, value in settings.items() if current.get(key) != value]
@@ -300,7 +343,7 @@ def provision_stream(event_app_dir: Path):
     digest = hashlib.sha256()
     for filename in PACKAGE_FILES:
         digest.update(filename.encode())
-        digest.update((event_app_dir / filename).read_bytes())
+        digest.update(package_path(event_app_dir, filename).read_bytes())
     package_hash = digest.hexdigest()
     if (app.get('tags') or {}).get('nora-package-sha256') == package_hash:
         LOGGER.info('Function code is unchanged; skipping deployment to %s', app_name)
@@ -309,14 +352,18 @@ def provision_stream(event_app_dir: Path):
             package = Path(directory) / 'event_app.zip'
             with zipfile.ZipFile(package, 'w', zipfile.ZIP_DEFLATED) as archive:
                 for filename in PACKAGE_FILES:
-                    archive.write(event_app_dir / filename, filename)
+                    archive.write(package_path(event_app_dir, filename), filename)
             cli.run('functionapp', 'deployment', 'source', 'config-zip', *app_args,
                     '--src', str(package), '--build-remote', 'true')
         cli.run('tag', 'update', '--resource-id', app['id'], '--operation', 'Merge',
                 '--tags', f'nora-package-sha256={package_hash}')
     functions = cli.run('functionapp', 'function', 'list', *app_args)
     expected = {'chat_history_changes', 'tool_history_changes', 'context_history_changes',
-                'feedback_changes', 'nora_grid_subscriber' if transport == 'eventgrid' else 'nora_update_subscriber'}
+                'feedback_changes'}
+    if transport == 'eventgrid':
+        expected.add('nora_grid_subscriber')
+    elif transport == 'eventhub':
+        expected.add('nora_update_subscriber')
     registered = {item['name'].split('/')[-1] for item in functions}
     if expected - registered:
         LOGGER.warning('Deployment submitted, but these functions are not registered yet: %s. '

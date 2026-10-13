@@ -40,8 +40,13 @@ flowchart LR
         direction LR
         L_COSMOS["Cosmos DB<br/>New or changed record"] --> L_FEED["Change feed<br/>Incremental capture"]
         L_FEED --> L_FUNCTION["Azure Function<br/>Validate and transform event"]
-        L_FUNCTION --> L_HUB["Event Hubs<br/>Buffered event stream"]
+        L_FUNCTION --> L_TRANSPORT{"Configured transport"}
+        L_TRANSPORT --> L_HUB["Event Hubs"]
+        L_TRANSPORT --> L_GRID["Event Grid"]
+        L_TRANSPORT --> L_KAFKA["On-prem Kafka"]
         L_HUB -.-> L_INTENT["Intent + decomposition<br/>Classify and normalize"]
+        L_GRID -.-> L_INTENT
+        L_KAFKA -.-> L_INTENT
         L_INTENT -.-> L_KG["Knowledge graph<br/>Context and evidence"]
         L_INTENT -.-> L_POLICY["Policy gate<br/>Allow, clarify, block"]
         L_INTENT -.-> L_API["NORA APIs<br/>Execute and report status"]
@@ -50,7 +55,7 @@ flowchart LR
     classDef implemented fill:#3698ba,color:#fff,stroke:#247c99;
     classDef optional fill:#3698ba,color:#fff,stroke:#247c99,stroke-dasharray:5 3;
     classDef planned fill:#11851a,color:#fff,stroke:#096810,stroke-dasharray:6 4;
-    class I_COSMOS,I_EXTRACT,I_FEATURES,L_COSMOS,L_FEED,L_FUNCTION,L_HUB implemented;
+    class I_COSMOS,I_EXTRACT,I_FEATURES,L_COSMOS,L_FEED,L_FUNCTION,L_TRANSPORT,L_HUB,L_GRID,L_KAFKA implemented;
     class I_ADLS,I_MODEL optional;
     class L_INTENT,L_KG,L_POLICY,L_API planned;
 ```
@@ -72,8 +77,9 @@ only submitted when the explicit `FOUNDRY_TRAINING_ENABLED` flag is true. The
 submission stores a local job receipt but deliberately does not deploy the model.
 
 The live flow uses Cosmos lease containers for checkpoints. Four change-feed
-triggers publish compact identifier-only events to Event Hubs. The Event Hubs
-subscriber currently validates and logs each event. Live intent classification,
+triggers publish compact identifier-only events to Event Hubs, Event Grid, or
+an existing Kafka topic. Event Hubs and Event Grid include validation subscribers;
+Kafka delivery ends at the on-prem topic for downstream consumers. Live intent classification,
 knowledge-graph enrichment, policy decisions, and NORA API execution remain
 planned downstream stages.
 

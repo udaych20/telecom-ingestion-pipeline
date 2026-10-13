@@ -3,6 +3,7 @@
 import json
 from datetime import datetime, timezone
 from pipeline_logging import LOGGER, progress
+from pii_masking import mask_pii, tokenize_identifier
 
 
 def query(container, field, values):
@@ -93,12 +94,12 @@ def get_interaction(
                 len(chats), len(context_history), len(tool_history), len(feedback))
 
     return {
-        "interaction_id": cid,
+        "interaction_id": tokenize_identifier(cid),
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
-        "cids": [cid],
-        "run_ids": run_ids,
-        "chat_history": chats,
-        "tool_history": remove_duplicates(tool_history),
-        "context_history": remove_duplicates(context_history),
-        "feedback": feedback,
+        "cids": [tokenize_identifier(cid)],
+        "run_ids": [tokenize_identifier(value) for value in run_ids],
+        "chat_history": mask_pii(chats),
+        "tool_history": mask_pii(remove_duplicates(tool_history)),
+        "context_history": mask_pii(remove_duplicates(context_history)),
+        "feedback": mask_pii(feedback),
     }
