@@ -77,11 +77,12 @@ only submitted when the explicit `FOUNDRY_TRAINING_ENABLED` flag is true. The
 submission stores a local job receipt but deliberately does not deploy the model.
 
 The live flow uses Cosmos lease containers for checkpoints. Four change-feed
-triggers publish compact identifier-only events to Event Hubs, Event Grid, or
-an existing Kafka topic. Event Hubs and Event Grid include validation subscribers;
-Kafka delivery ends at the on-prem topic for downstream consumers. Live intent classification,
-knowledge-graph enrichment, policy decisions, and NORA API execution remain
-planned downstream stages.
+triggers mask the changed document, apply the shared deterministic intent rules,
+and publish the same chat-format training candidate to Event Hubs, Event Grid,
+or an existing Kafka topic. Event Hubs and Event Grid include validation
+subscribers; Kafka delivery ends at the on-prem topic for downstream consumers.
+Candidates that need review remain marked as such. Knowledge-graph enrichment,
+policy decisions, and NORA API execution remain planned downstream stages.
 
 ## Query design
 

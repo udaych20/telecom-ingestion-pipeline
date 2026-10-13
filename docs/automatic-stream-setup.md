@@ -65,8 +65,9 @@ changes their throughput or writes source documents. Adding lease containers
 and data-role assignments is the only Cosmos provisioning it performs.
 Optional training-artifact Blob/ADLS destinations are outside this live setup.
 
-The existing live subscriber validates and logs change notifications. It does
-not yet perform model inference, intent decomposition or NORA API execution.
+The live publisher masks each changed record and adds a rule-classified,
+chat-format training candidate. The Event Hubs subscriber validates and logs
+the notification; it does not perform intent decomposition or NORA API execution.
 
 ## Prerequisites and limits
 

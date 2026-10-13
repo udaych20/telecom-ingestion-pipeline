@@ -1,4 +1,5 @@
 azure-functions
+azure-cosmos
 azure-eventhub
 azure-eventgrid>=4.22,<5
 azure-identity

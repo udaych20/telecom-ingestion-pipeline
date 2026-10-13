@@ -1,8 +1,9 @@
 # Kafka live mode
 
 Kafka is a third live transport alongside Event Hubs and Event Grid. The four
-Cosmos change-feed triggers publish compact CloudEvent JSON messages to an
-existing topic. The source Cosmos document is never placed on Kafka.
+Cosmos change-feed triggers publish CloudEvent JSON messages containing
+pseudonymized identifiers and a masked chat-format training candidate. The
+source Cosmos document is never placed on Kafka.
 
 ```dotenv
 STREAM_TRANSPORT=kafka

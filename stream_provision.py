@@ -22,7 +22,11 @@ SOURCE_DEFAULTS = {
     'COSMOS_CONTEXT_CONTAINER': ('context-history-uat', 'leases-context'),
     'COSMOS_FEEDBACK_CONTAINER': ('chat-feedback', 'leases-feedback'),
 }
-PACKAGE_FILES = ('function_app.py', 'host.json', 'requirements.txt', 'pii_masking.py')
+PACKAGE_FILES = (
+    'function_app.py', 'host.json', 'requirements.txt', 'pii_masking.py',
+    'training_messages.py', 'intent_app.py', 'interaction_reader.py',
+    'pipeline_auth.py', 'pipeline_logging.py', 'resume_export.py',
+)
 OWNER_TAG = 'nora-intent-stream'
 
 
@@ -43,7 +47,7 @@ def flag(name, default=False):
 
 
 def package_path(event_app_dir, filename):
-    if filename == 'pii_masking.py':
+    if filename not in {'function_app.py', 'host.json', 'requirements.txt'}:
         return event_app_dir.parent / filename
     return event_app_dir / filename
 

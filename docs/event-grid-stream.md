@@ -5,10 +5,11 @@ This supports the Event Grid **namespace** shown in your screenshot,
 topic, or an MQTT topic space. No Event Hubs resources are used in this mode.
 
 The flow is: Cosmos change feed → Function publisher → Event Grid HTTP namespace
-topic → pull subscription → timer Function subscriber. The subscriber currently
-validates and logs notifications, just like the original Event Hubs subscriber.
-It does not yet classify live records, join interactions, write a classification
-CSV, train a model or call NORA APIs. Initial-load classification is unchanged.
+topic → pull subscription → timer Function subscriber. The publisher masks and
+rule-classifies each usable changed record into the same chat-format training
+candidate used by Event Hubs and Kafka. The subscriber validates the candidate;
+it does not join interactions, train a model or call NORA APIs. Initial-load
+classification is unchanged.
 
 ## Automatic setup and publishing
 

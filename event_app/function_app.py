@@ -2,7 +2,7 @@
 
 The Cosmos trigger is backed by the change feed, so inserts and updates are
 published automatically. Source documents are not copied to the transport;
-only identifiers needed by downstream consumers are included.
+each event contains pseudonymized identifiers and a masked training candidate.
 """
 
 from __future__ import annotations
@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 import azure.functions as func
-from pii_masking import tokenize_identifier
+from pii_masking import mask_pii, tokenize_identifier
+from training_messages import build_training_candidate
 
 
 LOGGER = logging.getLogger("nora.event_app")
@@ -87,7 +88,7 @@ class EventGridPublisher:
 
 
 class KafkaPublisher:
-    """Publish compact change events to an existing Kafka topic."""
+    """Publish normalized change events to an existing Kafka topic."""
 
     def __init__(self):
         from kafka import KafkaProducer
@@ -181,31 +182,40 @@ def find_values(value: Any, field: str) -> list[str]:
     return list(dict.fromkeys(str(item) for item in found if str(item).strip()))
 
 
+def tokenized_values(document: dict[str, Any], field: str) -> list[str]:
+    return [tokenize_identifier(value) for value in find_values(document, field)]
+
+
+def document_event_time(document: dict[str, Any]) -> str:
+    timestamp = document.get("_ts")
+    if isinstance(timestamp, (int, float)):
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat()
+
+
 def build_event(container: str, document: dict[str, Any]) -> dict[str, Any]:
     """Create a stable CloudEvents-style notification for one document version."""
     document_id = str(document.get("id", ""))
     masked_document_id = tokenize_identifier(document_id) if document_id else ""
     etag = str(document.get("_etag", ""))
-    cids = [tokenize_identifier(value) for value in find_values(document, "cid")]
-    cid_lists = [tokenize_identifier(value) for value in find_values(document, "cid_list")]
-    run_ids = [tokenize_identifier(value) for value in find_values(document, "run_id")]
+    cids = tokenized_values(document, "cid")
+    cid_lists = tokenized_values(document, "cid_list")
+    run_ids = tokenized_values(document, "run_id")
+
+    masked_document = mask_pii(document)
+    training_candidate = build_training_candidate(masked_document)
+
     identity = f"{DATABASE_NAME}:{container}:{document_id}:{etag}"
     if not document_id or not etag:
         identity = json.dumps(document, sort_keys=True, default=str)
 
-    timestamp = document.get("_ts")
-    event_time = (
-        datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
-        if isinstance(timestamp, (int, float))
-        else datetime.now(timezone.utc).isoformat()
-    )
     event = {
         "specversion": "1.0",
         "id": hashlib.sha256(identity.encode("utf-8")).hexdigest(),
         "source": f"/cosmos/{DATABASE_NAME}/{container}",
         "type": "com.nora.cosmos.document.created-or-updated",
         "subject": masked_document_id,
-        "time": event_time,
+        "time": document_event_time(document),
         "datacontenttype": "application/json",
         "data": {
             "database": DATABASE_NAME,
@@ -215,6 +225,7 @@ def build_event(container: str, document: dict[str, Any]) -> dict[str, Any]:
             "cids": cids,
             "cid_lists": cid_lists,
             "run_ids": run_ids,
+            "training_candidate": training_candidate,
         },
     }
     LOGGER.debug(
@@ -328,16 +339,45 @@ def nora_update_subscriber(message: func.EventHubEvent) -> None:
 
 
 def process_event(event):
-    """Shared subscriber hook. Currently validates and logs; no model inference."""
+    """Validate the common event consumed from Event Hubs or Event Grid."""
     for field in ("id", "source", "type", "data"):
         if field not in event:
             raise ValueError(f"Event is missing {field}")
     data = event["data"]
     if not isinstance(data, dict):
         raise ValueError("NORA event data must be an object")
-    LOGGER.info("Received NORA update id=%s container=%s document_id=%s cids=%s run_ids=%s",
-                event["id"], data.get("container", ""), data.get("document_id", ""),
-                data.get("cids", []), data.get("run_ids", []))
+    candidate = data.get("training_candidate")
+    if candidate is not None:
+        validate_training_candidate(candidate)
+    LOGGER.info(
+        "Received NORA update id=%s container=%s document_id=%s cids=%s run_ids=%s",
+        event["id"],
+        data.get("container", ""),
+        data.get("document_id", ""),
+        data.get("cids", []),
+        data.get("run_ids", []),
+    )
+
+
+def validate_training_candidate(candidate: Any) -> None:
+    if not isinstance(candidate, dict):
+        raise ValueError("Live training candidate is not valid")
+    if candidate.get("status") != "training_candidate":
+        raise ValueError("Live training candidate is not valid")
+
+    messages = candidate.get("messages")
+    if not isinstance(messages, list) or len(messages) != 3:
+        raise ValueError("Live training candidate must contain system, user, and assistant messages")
+    if not all(isinstance(message, dict) for message in messages):
+        raise ValueError("Live training candidate messages must be objects")
+
+    expected_roles = ("system", "user", "assistant")
+    actual_roles = tuple(message.get("role") for message in messages)
+    if actual_roles != expected_roles:
+        raise ValueError("Live training candidate must contain system, user, and assistant messages")
+
+    if any(not str(item.get("content", "")).strip() for item in messages):
+        raise ValueError("Live training candidate messages cannot be empty")
 
 
 def consume_grid_events(client):

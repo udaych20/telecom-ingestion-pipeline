@@ -78,6 +78,34 @@ class KafkaTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "KAFKA_SASL_USERNAME"):
                 self.module.KafkaPublisher()
 
+    def test_all_transports_receive_chat_format_training_candidate(self):
+        event = self.module.build_event(
+            "chat",
+            {
+                "id": "doc-1",
+                "_etag": "v1",
+                "messages": [
+                    {
+                        "type": "user",
+                        "data": {
+                            "cid": "customer-1",
+                            "content": "Show the status for 15551234567",
+                        },
+                    }
+                ],
+                "customer_id": "customer-1",
+            },
+        )
+
+        candidate = event["data"]["training_candidate"]
+        self.assertEqual(
+            [message["role"] for message in candidate["messages"]],
+            ["system", "user", "assistant"],
+        )
+        self.assertEqual(candidate["messages"][2]["content"], "query")
+        self.assertNotIn("15551234567", json.dumps(candidate))
+        self.module.process_event(event)
+
 
 if __name__ == "__main__":
     unittest.main()

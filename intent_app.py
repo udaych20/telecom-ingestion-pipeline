@@ -44,6 +44,7 @@ from pipeline_logging import LOGGER, configure_logging, progress
 from pipeline_auth import create_pipeline_credential, check_cosmos_authentication
 from pii_masking import mask_pii
 from resume_export import ResumeExport
+from training_messages import SYSTEM_PROMPT
 
 
 TICKET_ID_RE = re.compile(
@@ -1000,10 +1001,7 @@ def build_foundry_datasets(
     redact_pii: bool = True,
     exclude_needs_review: bool = True,
     require_reviewed: bool = False,
-    system_prompt: str = (
-        "Classify the NORA customer request as ticket, modify, rca, query, "
-        "general, or clarification_needed. Return only the intent."
-    ),
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> tuple[dict[str, list[dict[str, Any]]], Counter[str]]:
     """Build deterministic chat-format datasets and rejection statistics."""
     if min(train_percent, validation_percent, test_percent) < 0:
