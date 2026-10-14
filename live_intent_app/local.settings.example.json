@@ -1,0 +1,32 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "COSMOS_CONNECTION__accountEndpoint": "https://YOUR-ACCOUNT.documents.azure.com:443/",
+    "COSMOS_DATABASE": "NORA",
+    "COSMOS_CHAT_CONTAINER": "chat-history-uat",
+    "COSMOS_CONTEXT_CONTAINER": "context-history-uat",
+    "COSMOS_TOOLS_CONTAINER": "context-history-all-tools",
+    "COSMOS_FEEDBACK_CONTAINER": "chat-feedback",
+    "COSMOS_CHAT_LEASE": "leases-live-chat",
+    "COSMOS_CONTEXT_LEASE": "leases-live-context",
+    "COSMOS_TOOLS_LEASE": "leases-live-tools",
+    "COSMOS_FEEDBACK_LEASE": "leases-live-feedback",
+    "STREAM_TRANSPORT": "eventhub",
+    "EVENT_HUB_NAMESPACE": "YOUR-NAMESPACE.servicebus.windows.net",
+    "EVENT_HUB_CONNECTION__fullyQualifiedNamespace": "YOUR-NAMESPACE.servicebus.windows.net",
+    "EVENT_HUB_NAME": "live-intent",
+    "EVENT_HUB_CONSUMER_GROUP": "live-intent-inference",
+    "REST_FALLBACK_ENDPOINT": "",
+    "REST_FALLBACK_API_KEY": "",
+    "MODEL_PROVIDER": "foundry",
+    "MODEL_ENDPOINT": "https://YOUR-CF-ROUTE.example.com/v1",
+    "MODEL_DEPLOYMENT": "YOUR-SLM",
+    "MODEL_API_KEY": "",
+    "CSV_SINK": "blob",
+    "CSV_BLOB_ACCOUNT_URL": "https://YOUR-STORAGE.blob.core.windows.net",
+    "CSV_BLOB_CONTAINER": "live-intent-results",
+    "CSV_BLOB_PREFIX": "inference"
+  }
+}

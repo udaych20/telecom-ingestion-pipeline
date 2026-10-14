@@ -4,4 +4,6 @@ __pycache__/
 .env
 output/
 event_app/local.settings.json
+live_intent_app/local.settings.json
+live_intent_app/*.egg-info/
 
