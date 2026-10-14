@@ -1,11 +1,34 @@
-# End-to-end Windows test
+# Windows quick start: live and demo modes
 
-This guide tests exactly this path:
+This project has two test modes. Complete the common setup once, then choose
+Mode 1 or Mode 2.
+
+## Modes
+
+### Mode 1 — live end-to-end flow
+
+Use this mode first. It verifies the actual integration path:
 
 ```text
 Cosmos test insert -> change feed -> local Azure Function -> local Kafka
   -> Cloud Foundry model -> output/live_intent.csv
 ```
+
+Nothing is bypassed. This mode requires the Cosmos change feed, Azure Functions
+Core Tools, Azure Storage, Kafka, and the Cloud Foundry model to be reachable.
+
+### Mode 2 — demo bypass flow
+
+Use this only when the Cosmos insert works but the change feed or local Azure
+Function cannot run because of environment or access limitations:
+
+```text
+Cosmos test insert -> read the same Cosmos record -> local Kafka
+  -> Cloud Foundry model -> output/live_intent.csv
+```
+
+Mode 2 bypasses only `cosmos_change_feed` and `local_azure_function`. It does
+not mock Kafka, Cloud Foundry inference, or CSV output.
 
 Run application commands from:
 
@@ -13,7 +36,9 @@ Run application commands from:
 cd D:\git\telecom-ingestion-pipeline\live_intent_app
 ```
 
-## 1. Prerequisites
+## Common setup
+
+### 1. Prerequisites
 
 Install Python 3.11, Azure CLI, and Azure Functions Core Tools 4. The supplied
 PowerShell setup installs Eclipse Temurin OpenJDK 21 and Apache Kafka. Node.js,
@@ -32,7 +57,7 @@ Then verify the installation:
 func --version
 ```
 
-## 2. Configuration
+### 2. Configuration
 
 ```powershell
 Copy-Item .\.env.example .\.env
@@ -108,7 +133,7 @@ $settings.Values.AzureWebJobsStorage = $storageConnection
 $settings | ConvertTo-Json -Depth 10 | Set-Content .\local.settings.json
 ```
 
-## 3. Install OpenJDK and Kafka once
+### 3. Install OpenJDK and Kafka once
 
 The setup downloads OpenJDK and Kafka into `live_intent_app\tools`, verifies both
 download checksums, and initializes a single-node KRaft data directory:
@@ -129,7 +154,7 @@ Keep Kafka running. In another terminal, create the topic:
 .\scripts\create-kafka-topic.ps1
 ```
 
-## 4. Run the end-to-end test
+## Mode 1 — run the live end-to-end test
 
 Keep each process running in a separate terminal.
 
@@ -166,7 +191,7 @@ python -m live_intent_app.insert_cosmos_test_document `
 
 The script creates a unique document ID on every run.
 
-## 5. Verify
+### Verify Mode 1
 
 The Function terminal should report a change-feed invocation. The Kafka worker
 should report the inferred event. Check the CSV:
@@ -185,11 +210,35 @@ Get-Content .\output\change_feed_audit.jsonl
 Get-Content .\output\live_intent.csv
 ```
 
-## 6. Targeted bypass
+Expected Mode 1 result:
+
+```text
+PASS         Cosmos insert
+PASS         Cosmos change feed
+PASS         Local Azure Function -> Kafka
+PASS         Kafka topic
+PASS         SLM inference -> intent CSV
+```
+
+## Mode 2 — run the demo bypass
 
 Use the bypass only when the Cosmos insert succeeded but the verifier cannot
 confirm the change feed or local Azure Function. It reads the same inserted
 document back from Cosmos and publishes the canonical event directly to Kafka:
+
+Kafka and the inference worker must still be running. The local Functions host
+is not required for this mode.
+
+If you are starting directly with Mode 2, use separate terminals to start Kafka
+and the inference worker as shown in Mode 1. Then insert a new Cosmos record:
+
+```powershell
+python -m live_intent_app.insert_cosmos_test_document `
+    --container chat-history-uat `
+    --message "Please check the status of my mobile service"
+```
+
+After the insert succeeds, replay that exact record to Kafka:
 
 ```powershell
 python -m live_intent_app.replay_cosmos_to_kafka
@@ -203,10 +252,26 @@ cosmos_change_feed
 local_azure_function
 ```
 
-Run the verifier again. The Cosmos change-feed and Function stages remain
+Run the verifier:
+
+```powershell
+python -m live_intent_app.verify_demo
+```
+
+The Cosmos change-feed and Function stages remain
 `NOT VERIFIED`; Kafka and the SLM intent CSV can pass. This is intentional.
 
-## 7. Access requirements
+Expected Mode 2 result:
+
+```text
+PASS         Cosmos insert
+NOT VERIFIED Cosmos change feed
+NOT VERIFIED Local Azure Function -> Kafka
+PASS         Kafka topic
+PASS         SLM inference -> intent CSV
+```
+
+## Access requirements
 
 - The `az login` identity needs Cosmos DB Built-in Data Contributor access so
   the script can insert and the local Function can read changes and write leases.
@@ -215,7 +280,7 @@ Run the verifier again. The Cosmos change-feed and Function stages remain
 - `AzureWebJobsStorage` must contain the real Azure Storage connection string,
   and the Windows server must be able to reach Azure Storage.
 
-## 8. Tests
+## Unit tests
 
 ```powershell
 python -m unittest discover -s .\tests -v
