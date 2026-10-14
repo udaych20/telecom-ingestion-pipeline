@@ -3,13 +3,8 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
-import urllib.error
-import urllib.request
 from typing import Any, Protocol
-
-LOGGER = logging.getLogger("live_intent.transport")
 
 
 class Publisher(Protocol):
@@ -80,95 +75,10 @@ class KafkaPublisher:
         result.get(timeout=30)
 
 
-class RestPublisher:
-    """Post events to the demo/inference API when a broker is unavailable."""
-
-    def __init__(self) -> None:
-        self.endpoint = required("REST_FALLBACK_ENDPOINT")
-        self.api_key = os.getenv("REST_FALLBACK_API_KEY", "").strip()
-        self.timeout = float(os.getenv("REST_FALLBACK_TIMEOUT_SECONDS", "30"))
-
-    def publish(self, event: dict[str, Any], key: str) -> None:
-        headers = {
-            "Content-Type": "application/json",
-            "X-Partition-Key": key,
-        }
-        if self.api_key:
-            header_name = os.getenv(
-                "REST_FALLBACK_API_KEY_HEADER",
-                "x-functions-key",
-            )
-            headers[header_name] = self.api_key
-
-        request = urllib.request.Request(
-            self.endpoint,
-            data=json.dumps(event).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            if response.status < 200 or response.status >= 300:
-                raise RuntimeError(
-                    f"REST fallback returned HTTP {response.status}"
-                )
-
-
-class PermissionFallbackPublisher:
-    """Use REST only when the primary transport rejects authorization."""
-
-    def __init__(self, primary: Publisher, fallback: Publisher) -> None:
-        self.primary = primary
-        self.fallback = fallback
-
-    def publish(self, event: dict[str, Any], key: str) -> None:
-        try:
-            self.primary.publish(event, key)
-        except Exception as error:
-            if not is_permission_error(error):
-                raise
-            LOGGER.warning(
-                "Primary stream transport denied access; sending event %s "
-                "through the configured REST fallback",
-                event.get("id", "unknown"),
-            )
-            self.fallback.publish(event, key)
-
-
-def is_permission_error(error: Exception) -> bool:
-    status_code = getattr(error, "status_code", None)
-    if status_code in {401, 403}:
-        return True
-
-    error_name = type(error).__name__.lower()
-    permission_names = (
-        "authentication",
-        "authorization",
-        "permission",
-        "sasl",
-    )
-    return any(name in error_name for name in permission_names)
-
-
 def configured_publisher() -> Publisher:
     kind = os.getenv("STREAM_TRANSPORT", "eventhub").strip().lower()
-    if kind == "rest":
-        return RestPublisher()
-    if kind not in {"eventhub", "kafka"}:
-        raise ValueError("STREAM_TRANSPORT must be eventhub, kafka, or rest")
-
-    fallback_endpoint = os.getenv("REST_FALLBACK_ENDPOINT", "").strip()
-    publisher_type = EventHubPublisher if kind == "eventhub" else KafkaPublisher
-
-    try:
-        primary: Publisher = publisher_type()
-    except Exception as error:
-        if not fallback_endpoint or not is_permission_error(error):
-            raise
-        LOGGER.warning(
-            "Primary stream transport could not authenticate; using REST fallback"
-        )
-        return RestPublisher()
-
-    if fallback_endpoint:
-        return PermissionFallbackPublisher(primary, RestPublisher())
-    return primary
+    if kind == "eventhub":
+        return EventHubPublisher()
+    if kind == "kafka":
+        return KafkaPublisher()
+    raise ValueError("STREAM_TRANSPORT must be eventhub or kafka")

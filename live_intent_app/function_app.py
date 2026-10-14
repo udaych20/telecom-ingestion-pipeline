@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import threading
-from typing import Any
 
 import azure.functions as func
 
@@ -126,28 +125,3 @@ if os.getenv("STREAM_TRANSPORT", "eventhub").strip().lower() == "eventhub":
         connection="EVENT_HUB_CONNECTION",
         consumer_group=os.getenv("EVENT_HUB_CONSUMER_GROUP", "live-intent-inference"),
     )(event_hub_consumer)
-
-
-@app.route(route="demo/infer", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
-def demo_infer(request: func.HttpRequest) -> func.HttpResponse:
-    """Test-only ingress; accepts a document or a complete change event."""
-    try:
-        body: Any = request.get_json()
-        if not isinstance(body, dict):
-            raise ValueError("Request body must be a JSON object")
-        if {"id", "source", "type", "data"}.issubset(body):
-            event = body
-        else:
-            event = build_change_event("demo", body)
-        result = pipeline().process(event)
-        return func.HttpResponse(
-            json.dumps(result),
-            status_code=200,
-            mimetype="application/json",
-        )
-    except (ValueError, json.JSONDecodeError) as error:
-        return func.HttpResponse(
-            json.dumps({"error": str(error)}),
-            status_code=400,
-            mimetype="application/json",
-        )

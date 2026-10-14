@@ -26,6 +26,7 @@ class AzureNames:
     resource_group: str
     location: str
     cosmos_account: str
+    storage_account: str
     database: str
     event_hubs_namespace: str
     event_hub: str
@@ -80,6 +81,7 @@ def configured_names() -> AzureNames:
         resource_group=required("AZURE_RESOURCE_GROUP"),
         location=required("AZURE_LOCATION"),
         cosmos_account=required("AZURE_COSMOS_ACCOUNT"),
+        storage_account=required("AZURE_FUNCTION_STORAGE_ACCOUNT"),
         database=os.getenv("COSMOS_DATABASE", "NORA"),
         event_hubs_namespace=required("EVENT_HUB_NAMESPACE_NAME"),
         event_hub=os.getenv("EVENT_HUB_NAME", "live-intent"),
@@ -124,6 +126,33 @@ def ensure_cosmos_account(cli: AzureCli, names: AzureNames) -> None:
         "Session",
     )
     print(f"Created serverless Cosmos account: {names.cosmos_account}")
+
+
+def ensure_function_storage(cli: AzureCli, names: AzureNames) -> None:
+    common = (
+        "--resource-group",
+        names.resource_group,
+        "--name",
+        names.storage_account,
+    )
+    if cli.exists("storage", "account", "show", *common):
+        print(f"Function storage account exists: {names.storage_account}")
+        return
+    cli.run(
+        "storage",
+        "account",
+        "create",
+        *common,
+        "--location",
+        names.location,
+        "--sku",
+        "Standard_LRS",
+        "--kind",
+        "StorageV2",
+        "--allow-blob-public-access",
+        "false",
+    )
+    print(f"Created Function storage account: {names.storage_account}")
 
 
 def ensure_cosmos_database(cli: AzureCli, names: AzureNames) -> None:
@@ -316,23 +345,20 @@ def print_runtime_settings(names: AzureNames) -> None:
     print(f"EVENT_HUB_CONNECTION__fullyQualifiedNamespace={namespace}")
     print(f"EVENT_HUB_NAME={names.event_hub}")
     print(f"EVENT_HUB_CONSUMER_GROUP={names.consumer_group}")
+    print(f"AZURE_FUNCTION_STORAGE_ACCOUNT={names.storage_account}")
 
 
-def print_rest_fallback() -> None:
+def print_permission_help() -> None:
     print("\nAzure provisioning or role assignment was denied.")
-    print("The no-cloud demo still works with:")
-    print("  MODEL_PROVIDER=demo")
-    print("  CSV_SINK=local")
-    print("  python -m live_intent_app.demo_service")
-    print("For broker permission failures, configure:")
-    print("  REST_FALLBACK_ENDPOINT=http://HOST:8080/demo/infer")
-    print("Or bypass the broker with STREAM_TRANSPORT=rest.")
+    print("Ask an Azure administrator to create the resources or grant the")
+    print("required resource-creation and role-assignment permissions.")
 
 
 def provision(dry_run: bool = False) -> None:
     names = configured_names()
     cli = AzureCli(names.subscription, dry_run=dry_run)
     ensure_resource_group(cli, names)
+    ensure_function_storage(cli, names)
     ensure_cosmos_account(cli, names)
     ensure_cosmos_database(cli, names)
     for container in container_names():
@@ -355,7 +381,7 @@ def main() -> None:
         provision(dry_run=args.dry_run)
     except (ProvisioningError, ValueError, FileNotFoundError) as error:
         print(f"Provisioning failed: {error}")
-        print_rest_fallback()
+        print_permission_help()
         raise SystemExit(1) from error
 
 

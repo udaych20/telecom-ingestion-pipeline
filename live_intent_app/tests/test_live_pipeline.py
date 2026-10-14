@@ -4,12 +4,14 @@ import unittest
 from pathlib import Path
 
 from live_intent_app.contracts import build_change_event
-from live_intent_app.inference import DemoRuleModel
+from live_intent_app.inference import Inference
+from live_intent_app.insert_cosmos_test_document import build_document
 from live_intent_app.pipeline import LiveIntentPipeline, LocalCsvSink
-from live_intent_app.transports import (
-    PermissionFallbackPublisher,
-    is_permission_error,
-)
+
+
+class TestModel:
+    def infer(self, text):
+        return Inference("query", 0.91, "Test prediction", "test-model")
 
 
 class LivePipelineTests(unittest.TestCase):
@@ -30,7 +32,7 @@ class LivePipelineTests(unittest.TestCase):
         event = build_change_event("chat", document)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "result.csv"
-            pipeline = LiveIntentPipeline(DemoRuleModel(), LocalCsvSink(path))
+            pipeline = LiveIntentPipeline(TestModel(), LocalCsvSink(path))
             first = pipeline.process(event)
             second = pipeline.process(event)
             self.assertEqual(first["intent"], "query")
@@ -47,29 +49,16 @@ class LivePipelineTests(unittest.TestCase):
         two = build_change_event("chat", {"id": "1", "_etag": "b"})
         self.assertNotEqual(one["id"], two["id"])
 
-    def test_permission_failure_uses_rest_fallback(self):
-        class AuthorizationError(Exception):
-            pass
+    def test_cosmos_test_document_matches_expected_shape(self):
+        document = build_document("doc-1", "cid-1", "Check service status")
 
-        class DeniedPublisher:
-            def publish(self, event, key):
-                raise AuthorizationError("denied")
-
-        class RecordingPublisher:
-            def __init__(self):
-                self.events = []
-
-            def publish(self, event, key):
-                self.events.append((event, key))
-
-        fallback = RecordingPublisher()
-        publisher = PermissionFallbackPublisher(DeniedPublisher(), fallback)
-        event = {"id": "event-1"}
-
-        publisher.publish(event, "cid-1")
-
-        self.assertEqual(fallback.events, [(event, "cid-1")])
-        self.assertTrue(is_permission_error(AuthorizationError("denied")))
+        self.assertEqual(document["id"], "doc-1")
+        self.assertEqual(document["messages"][0]["data"]["cid"], "cid-1")
+        self.assertEqual(
+            document["messages"][0]["data"]["content"],
+            "Check service status",
+        )
+        self.assertTrue(document["test_record"])
 
 
 if __name__ == "__main__":

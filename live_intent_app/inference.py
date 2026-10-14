@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -35,33 +34,6 @@ class Inference:
 
 class IntentModel(Protocol):
     def infer(self, text: str) -> Inference: ...
-
-
-class DemoRuleModel:
-    """Offline stand-in for demos; production must use MODEL_PROVIDER=foundry."""
-
-    def infer(self, text: str) -> Inference:
-        lowered = text.lower()
-        rules = (
-            ("ticket", r"\b(ticket|case|incident|service request)\b"),
-            ("modify", r"\b(change|modify|update|enable|disable|reset|activate)\b"),
-            (
-                "rca",
-                r"\b(why|investigate|diagnose|troubleshoot|root cause|"
-                r"not working|offline|failing)\b",
-            ),
-            ("query", r"\b(what|when|where|which|who|how many|show|check|status)\b"),
-            ("general", r"\b(explain|define|what is|documentation|policy)\b"),
-        )
-        for intent, pattern in rules:
-            if re.search(pattern, lowered):
-                return Inference(intent, 0.70, "Demo rule match", "demo-rules")
-        return Inference(
-            "clarification_needed",
-            0.50,
-            "No demo rule matched",
-            "demo-rules",
-        )
 
 
 class FoundryModel:
@@ -131,9 +103,4 @@ def required(name: str) -> str:
 
 
 def configured_model() -> IntentModel:
-    provider = os.getenv("MODEL_PROVIDER", "foundry").strip().lower()
-    if provider == "foundry":
-        return FoundryModel()
-    if provider == "demo":
-        return DemoRuleModel()
-    raise ValueError("MODEL_PROVIDER must be foundry or demo")
+    return FoundryModel()
