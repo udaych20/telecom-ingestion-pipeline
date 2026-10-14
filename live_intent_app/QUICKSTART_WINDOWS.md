@@ -46,10 +46,9 @@ COSMOS_CONNECTION__accountEndpoint=https://YOUR-ACCOUNT.documents.azure.com:443/
 COSMOS_DATABASE=NORA
 COSMOS_CHAT_CONTAINER=chat-history-uat
 
-STREAM_TRANSPORT=kafka
 KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-KAFKA_TOPIC=live-intent
-KAFKA_CONSUMER_GROUP=live-intent-inference
+KAFKA_TOPIC=cosmos-changes
+KAFKA_CONSUMER_GROUP=slm-inference
 KAFKA_SECURITY_PROTOCOL=PLAINTEXT
 
 MODEL_ENDPOINT=https://YOUR-CLOUD-FOUNDRY-ROUTE.example.com/v1
@@ -57,7 +56,6 @@ MODEL_DEPLOYMENT=YOUR-SLM
 MODEL_API_KEY=YOUR-MODEL-KEY
 MODEL_API_KEY_HEADER=Authorization
 
-CSV_SINK=local
 CSV_OUTPUT=output/live_intent.csv
 ```
 
@@ -79,9 +77,8 @@ Update `local.settings.json` for the local Functions host:
     "COSMOS_TOOLS_LEASE": "leases-live-tools",
     "COSMOS_FEEDBACK_CONTAINER": "chat-feedback",
     "COSMOS_FEEDBACK_LEASE": "leases-live-feedback",
-    "STREAM_TRANSPORT": "kafka",
     "KAFKA_BOOTSTRAP_SERVERS": "localhost:9092",
-    "KAFKA_TOPIC": "live-intent",
+    "KAFKA_TOPIC": "cosmos-changes",
     "KAFKA_SECURITY_PROTOCOL": "PLAINTEXT"
   }
 }
@@ -174,11 +171,42 @@ The script creates a unique document ID on every run.
 The Function terminal should report a change-feed invocation. The Kafka worker
 should report the inferred event. Check the CSV:
 
+Run the verifier after allowing the Function and worker to process the event:
+
 ```powershell
+python -m live_intent_app.verify_demo
+```
+
+It reports separate results for the Cosmos insert, change feed, local Function
+publication, Kafka topic, and SLM-to-CSV processing. You can also inspect:
+
+```powershell
+Get-Content .\output\change_feed_audit.jsonl
 Get-Content .\output\live_intent.csv
 ```
 
-## 6. Access requirements
+## 6. Targeted bypass
+
+Use the bypass only when the Cosmos insert succeeded but the verifier cannot
+confirm the change feed or local Azure Function. It reads the same inserted
+document back from Cosmos and publishes the canonical event directly to Kafka:
+
+```powershell
+python -m live_intent_app.replay_cosmos_to_kafka
+```
+
+The event is marked with `demo_bypass=true` and lists exactly these skipped
+stages:
+
+```text
+cosmos_change_feed
+local_azure_function
+```
+
+Run the verifier again. The Cosmos change-feed and Function stages remain
+`NOT VERIFIED`; Kafka and the SLM intent CSV can pass. This is intentional.
+
+## 7. Access requirements
 
 - The `az login` identity needs Cosmos DB Built-in Data Contributor access so
   the script can insert and the local Function can read changes and write leases.
@@ -187,7 +215,7 @@ Get-Content .\output\live_intent.csv
 - `AzureWebJobsStorage` must contain the real Azure Storage connection string,
   and the Windows server must be able to reach Azure Storage.
 
-## 7. Tests
+## 8. Tests
 
 ```powershell
 python -m unittest discover -s .\tests -v

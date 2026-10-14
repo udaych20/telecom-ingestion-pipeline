@@ -28,9 +28,6 @@ class AzureNames:
     cosmos_account: str
     storage_account: str
     database: str
-    event_hubs_namespace: str
-    event_hub: str
-    consumer_group: str
 
 
 class AzureCli:
@@ -68,6 +65,11 @@ class AzureCli:
         return bool(output)
 
 
+def report_created(cli: AzureCli, resource: str, name: str) -> None:
+    action = "Would create" if cli.dry_run else "Created"
+    print(f"{action} {resource}: {name}")
+
+
 def required(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
@@ -83,12 +85,6 @@ def configured_names() -> AzureNames:
         cosmos_account=required("AZURE_COSMOS_ACCOUNT"),
         storage_account=required("AZURE_FUNCTION_STORAGE_ACCOUNT"),
         database=os.getenv("COSMOS_DATABASE", "NORA"),
-        event_hubs_namespace=required("EVENT_HUB_NAMESPACE_NAME"),
-        event_hub=os.getenv("EVENT_HUB_NAME", "live-intent"),
-        consumer_group=os.getenv(
-            "EVENT_HUB_CONSUMER_GROUP",
-            "live-intent-inference",
-        ),
     )
 
 
@@ -104,7 +100,7 @@ def ensure_resource_group(cli: AzureCli, names: AzureNames) -> None:
         "--location",
         names.location,
     )
-    print(f"Created resource group: {names.resource_group}")
+    report_created(cli, "resource group", names.resource_group)
 
 
 def ensure_cosmos_account(cli: AzureCli, names: AzureNames) -> None:
@@ -125,7 +121,7 @@ def ensure_cosmos_account(cli: AzureCli, names: AzureNames) -> None:
         "--default-consistency-level",
         "Session",
     )
-    print(f"Created serverless Cosmos account: {names.cosmos_account}")
+    report_created(cli, "serverless Cosmos account", names.cosmos_account)
 
 
 def ensure_function_storage(cli: AzureCli, names: AzureNames) -> None:
@@ -152,7 +148,7 @@ def ensure_function_storage(cli: AzureCli, names: AzureNames) -> None:
         "--allow-blob-public-access",
         "false",
     )
-    print(f"Created Function storage account: {names.storage_account}")
+    report_created(cli, "Function storage account", names.storage_account)
 
 
 def ensure_cosmos_database(cli: AzureCli, names: AzureNames) -> None:
@@ -168,7 +164,7 @@ def ensure_cosmos_database(cli: AzureCli, names: AzureNames) -> None:
         print(f"Cosmos database exists: {names.database}")
         return
     cli.run("cosmosdb", "sql", "database", "create", *common)
-    print(f"Created Cosmos database: {names.database}")
+    report_created(cli, "Cosmos database", names.database)
 
 
 def container_names() -> list[str]:
@@ -212,60 +208,7 @@ def ensure_cosmos_container(
         "--partition-key-path",
         os.getenv("COSMOS_PARTITION_KEY_PATH", "/id"),
     )
-    print(f"Created Cosmos container: {container}")
-
-
-def ensure_event_hubs(cli: AzureCli, names: AzureNames) -> None:
-    namespace_args = (
-        "--resource-group",
-        names.resource_group,
-        "--name",
-        names.event_hubs_namespace,
-    )
-    if not cli.exists("eventhubs", "namespace", "show", *namespace_args):
-        cli.run(
-            "eventhubs",
-            "namespace",
-            "create",
-            *namespace_args,
-            "--location",
-            names.location,
-            "--sku",
-            "Standard",
-        )
-        print(f"Created Event Hubs namespace: {names.event_hubs_namespace}")
-    else:
-        print(f"Event Hubs namespace exists: {names.event_hubs_namespace}")
-
-    hub_args = (
-        "--resource-group",
-        names.resource_group,
-        "--namespace-name",
-        names.event_hubs_namespace,
-        "--name",
-        names.event_hub,
-    )
-    if not cli.exists("eventhubs", "eventhub", "show", *hub_args):
-        cli.run("eventhubs", "eventhub", "create", *hub_args)
-        print(f"Created Event Hub: {names.event_hub}")
-    else:
-        print(f"Event Hub exists: {names.event_hub}")
-
-    consumer_args = (
-        "--resource-group",
-        names.resource_group,
-        "--namespace-name",
-        names.event_hubs_namespace,
-        "--eventhub-name",
-        names.event_hub,
-        "--name",
-        names.consumer_group,
-    )
-    if not cli.exists("eventhubs", "eventhub", "consumer-group", "show", *consumer_args):
-        cli.run("eventhubs", "eventhub", "consumer-group", "create", *consumer_args)
-        print(f"Created consumer group: {names.consumer_group}")
-    else:
-        print(f"Consumer group exists: {names.consumer_group}")
+    report_created(cli, "Cosmos container", container)
 
 
 def assign_function_roles(cli: AzureCli, names: AzureNames) -> None:
@@ -305,51 +248,24 @@ def assign_function_roles(cli: AzureCli, names: AzureNames) -> None:
         role_definition,
     )
 
-    namespace_id = cli.run(
-        "eventhubs",
-        "namespace",
-        "show",
-        "--resource-group",
-        names.resource_group,
-        "--name",
-        names.event_hubs_namespace,
-        "--query",
-        "id",
-        "--output",
-        "tsv",
-    )
-    for role in ("Azure Event Hubs Data Sender", "Azure Event Hubs Data Receiver"):
-        cli.run(
-            "role",
-            "assignment",
-            "create",
-            "--assignee-object-id",
-            principal_id,
-            "--assignee-principal-type",
-            "ServicePrincipal",
-            "--role",
-            role,
-            "--scope",
-            namespace_id,
-        )
-    print("Assigned Cosmos and Event Hubs roles to the Function identity")
+    action = "Would assign" if cli.dry_run else "Assigned"
+    print(f"{action} Cosmos role to the Function identity")
 
 
 def print_runtime_settings(names: AzureNames) -> None:
     endpoint = f"https://{names.cosmos_account}.documents.azure.com:443/"
-    namespace = f"{names.event_hubs_namespace}.servicebus.windows.net"
     print("\nRuntime settings:")
     print(f"COSMOS_CONNECTION__accountEndpoint={endpoint}")
     print(f"COSMOS_DATABASE={names.database}")
-    print(f"EVENT_HUB_NAMESPACE={namespace}")
-    print(f"EVENT_HUB_CONNECTION__fullyQualifiedNamespace={namespace}")
-    print(f"EVENT_HUB_NAME={names.event_hub}")
-    print(f"EVENT_HUB_CONSUMER_GROUP={names.consumer_group}")
     print(f"AZURE_FUNCTION_STORAGE_ACCOUNT={names.storage_account}")
 
 
-def print_permission_help() -> None:
-    print("\nAzure provisioning or role assignment was denied.")
+def print_provisioning_help(error: Exception) -> None:
+    print("\nAzure provisioning did not complete.")
+    if isinstance(error, FileNotFoundError):
+        print("Windows could not find az.exe. Install Azure CLI or add it to PATH.")
+        print("Check with: Get-Command az")
+        return
     print("Ask an Azure administrator to create the resources or grant the")
     print("required resource-creation and role-assignment permissions.")
 
@@ -363,7 +279,6 @@ def provision(dry_run: bool = False) -> None:
     ensure_cosmos_database(cli, names)
     for container in container_names():
         ensure_cosmos_container(cli, names, container)
-    ensure_event_hubs(cli, names)
     assign_function_roles(cli, names)
     print_runtime_settings(names)
 
@@ -381,7 +296,7 @@ def main() -> None:
         provision(dry_run=args.dry_run)
     except (ProvisioningError, ValueError, FileNotFoundError) as error:
         print(f"Provisioning failed: {error}")
-        print_permission_help()
+        print_provisioning_help(error)
         raise SystemExit(1) from error
 
 

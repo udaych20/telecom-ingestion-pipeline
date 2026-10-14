@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from live_intent_app.contracts import build_change_event
+from live_intent_app.contracts import build_change_event, mark_demo_bypass
 from live_intent_app.inference import Inference
 from live_intent_app.insert_cosmos_test_document import build_document
 from live_intent_app.pipeline import LiveIntentPipeline, LocalCsvSink
@@ -59,6 +59,15 @@ class LivePipelineTests(unittest.TestCase):
             "Check service status",
         )
         self.assertTrue(document["test_record"])
+
+    def test_demo_bypass_is_explicit(self):
+        event = mark_demo_bypass(build_change_event("chat", {"id": "1", "_etag": "a"}))
+
+        self.assertTrue(event["demo_bypass"])
+        self.assertEqual(
+            event["bypassed_stages"],
+            ["cosmos_change_feed", "local_azure_function"],
+        )
 
 
 if __name__ == "__main__":

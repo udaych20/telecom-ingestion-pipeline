@@ -1,4 +1,4 @@
-"""Wire contracts shared by the Azure Function, stream worker, and demo API."""
+"""Wire contracts shared by the Azure Function and stream worker."""
 
 from __future__ import annotations
 
@@ -35,6 +35,16 @@ def build_change_event(container: str, document: dict[str, Any]) -> dict[str, An
         "datacontenttype": "application/json",
         "data": {"container": container, "document": document},
     }
+
+
+def mark_demo_bypass(event: dict[str, Any]) -> dict[str, Any]:
+    """Mark an event that bypassed only the change feed and Azure Function."""
+    event["demo_bypass"] = True
+    event["bypassed_stages"] = [
+        "cosmos_change_feed",
+        "local_azure_function",
+    ]
+    return event
 
 
 def validate_event(event: Any) -> dict[str, Any]:

@@ -22,7 +22,7 @@ def main() -> None:
     options.pop("client_id", None)
     consumer = KafkaConsumer(
         required("KAFKA_TOPIC"),
-        group_id=os.getenv("KAFKA_CONSUMER_GROUP", "live-intent-inference"),
+        group_id=os.getenv("KAFKA_CONSUMER_GROUP", "slm-inference"),
         enable_auto_commit=False,
         auto_offset_reset="earliest",
         **options,

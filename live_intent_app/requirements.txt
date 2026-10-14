@@ -1,7 +1,6 @@
 azure-functions
-azure-eventhub
+azure-cosmos
 azure-identity
-azure-storage-blob
 kafka-python>=3,<4
 python-dotenv
 -e .

@@ -1,4 +1,4 @@
-"""Azure Functions entry point: Cosmos change feed -> stream -> inference."""
+"""Azure Function entry point: Cosmos change feed to Kafka."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import threading
+from pathlib import Path
 
 import azure.functions as func
 
@@ -14,14 +15,13 @@ from live_intent_app.settings import load_local_environment
 load_local_environment()
 
 from live_intent_app.contracts import build_change_event
-from live_intent_app.pipeline import LiveIntentPipeline
 from live_intent_app.transports import Publisher, configured_publisher
 
 app = func.FunctionApp()
 LOGGER = logging.getLogger("live_intent")
 _publisher: Publisher | None = None
-_pipeline: LiveIntentPipeline | None = None
 _lock = threading.Lock()
+_audit_lock = threading.Lock()
 
 
 def publisher() -> Publisher:
@@ -33,15 +33,6 @@ def publisher() -> Publisher:
     return _publisher
 
 
-def pipeline() -> LiveIntentPipeline:
-    global _pipeline
-    if _pipeline is None:
-        with _lock:
-            if _pipeline is None:
-                _pipeline = LiveIntentPipeline()
-    return _pipeline
-
-
 def publish_changes(documents: func.DocumentList, container: str) -> None:
     for item in documents or []:
         document = dict(item)
@@ -49,7 +40,44 @@ def publish_changes(documents: func.DocumentList, container: str) -> None:
         partition_key = str(
             document.get("cid") or document.get("id") or event["id"]
         )
+        write_demo_audit("CHANGE_FEED_RECEIVED", event, partition_key)
+        LOGGER.info(
+            "CHANGE_FEED_RECEIVED event_id=%s document_id=%s trace_id=%s",
+            event["id"],
+            document.get("id", ""),
+            document.get("_demo_trace_id", ""),
+        )
         publisher().publish(event, partition_key)
+        write_demo_audit("KAFKA_PUBLISHED", event, partition_key)
+        LOGGER.info(
+            "KAFKA_PUBLISHED event_id=%s topic=%s partition_key=%s",
+            event["id"],
+            os.getenv("KAFKA_TOPIC", "cosmos-changes"),
+            partition_key,
+        )
+
+
+def write_demo_audit(
+    stage: str,
+    event: dict,
+    partition_key: str,
+) -> None:
+    """Write local evidence for the demo without changing event processing."""
+    if os.getenv("DEMO_AUDIT_ENABLED", "true").lower() != "true":
+        return
+
+    path = Path(os.getenv("DEMO_AUDIT_OUTPUT", "output/change_feed_audit.jsonl"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "stage": stage,
+        "event_id": event["id"],
+        "document_id": event["data"]["document"].get("id", ""),
+        "trace_id": event["data"]["document"].get("_demo_trace_id", ""),
+        "partition_key": partition_key,
+    }
+    with _audit_lock:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def cosmos_trigger(
@@ -75,7 +103,8 @@ def cosmos_trigger(
     "leases-live-chat",
 )
 def chat_changes(documents: func.DocumentList) -> None:
-    publish_changes(documents, os.getenv("COSMOS_CHAT_CONTAINER", "chat-history-uat"))
+    container = os.getenv("COSMOS_CHAT_CONTAINER", "chat-history-uat")
+    publish_changes(documents, container)
 
 
 @cosmos_trigger(
@@ -85,7 +114,8 @@ def chat_changes(documents: func.DocumentList) -> None:
     "leases-live-context",
 )
 def context_changes(documents: func.DocumentList) -> None:
-    publish_changes(documents, os.getenv("COSMOS_CONTEXT_CONTAINER", "context-history-uat"))
+    container = os.getenv("COSMOS_CONTEXT_CONTAINER", "context-history-uat")
+    publish_changes(documents, container)
 
 
 @cosmos_trigger(
@@ -95,7 +125,8 @@ def context_changes(documents: func.DocumentList) -> None:
     "leases-live-tools",
 )
 def tool_changes(documents: func.DocumentList) -> None:
-    publish_changes(documents, os.getenv("COSMOS_TOOLS_CONTAINER", "context-history-all-tools"))
+    container = os.getenv("COSMOS_TOOLS_CONTAINER", "context-history-all-tools")
+    publish_changes(documents, container)
 
 
 @cosmos_trigger(
@@ -105,23 +136,5 @@ def tool_changes(documents: func.DocumentList) -> None:
     "leases-live-feedback",
 )
 def feedback_changes(documents: func.DocumentList) -> None:
-    publish_changes(documents, os.getenv("COSMOS_FEEDBACK_CONTAINER", "chat-feedback"))
-
-
-def event_hub_consumer(message: func.EventHubEvent) -> None:
-    result = pipeline().process(json.loads(message.get_body().decode("utf-8")))
-    LOGGER.info(
-        "Inferred event=%s intent=%s saved=%s",
-        result["event_id"],
-        result["intent"],
-        result["saved"],
-    )
-
-
-if os.getenv("STREAM_TRANSPORT", "eventhub").strip().lower() == "eventhub":
-    event_hub_consumer = app.event_hub_message_trigger(
-        arg_name="message",
-        event_hub_name=os.getenv("EVENT_HUB_NAME", "live-intent"),
-        connection="EVENT_HUB_CONNECTION",
-        consumer_group=os.getenv("EVENT_HUB_CONSUMER_GROUP", "live-intent-inference"),
-    )(event_hub_consumer)
+    container = os.getenv("COSMOS_FEEDBACK_CONTAINER", "chat-feedback")
+    publish_changes(documents, container)

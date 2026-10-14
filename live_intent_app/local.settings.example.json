@@ -13,16 +13,10 @@
     "COSMOS_CONTEXT_LEASE": "leases-live-context",
     "COSMOS_TOOLS_LEASE": "leases-live-tools",
     "COSMOS_FEEDBACK_LEASE": "leases-live-feedback",
-    "STREAM_TRANSPORT": "kafka",
-    "EVENT_HUB_NAMESPACE": "YOUR-NAMESPACE.servicebus.windows.net",
-    "EVENT_HUB_CONNECTION__fullyQualifiedNamespace": "YOUR-NAMESPACE.servicebus.windows.net",
-    "EVENT_HUB_NAME": "live-intent",
-    "EVENT_HUB_CONSUMER_GROUP": "live-intent-inference",
     "KAFKA_BOOTSTRAP_SERVERS": "localhost:9092",
-    "KAFKA_TOPIC": "live-intent",
-    "KAFKA_CONSUMER_GROUP": "live-intent-inference",
+    "KAFKA_TOPIC": "cosmos-changes",
     "KAFKA_SECURITY_PROTOCOL": "PLAINTEXT",
-    "CSV_SINK": "local",
-    "CSV_OUTPUT": "output/live_intent.csv"
+    "DEMO_AUDIT_ENABLED": "true",
+    "DEMO_AUDIT_OUTPUT": "output/change_feed_audit.jsonl"
   }
 }

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Topic = "live-intent",
+    [string]$Topic = "cosmos-changes",
     [string]$BootstrapServer = "localhost:9092",
     [string]$InstallRoot = (Join-Path $PSScriptRoot "..\tools")
 )

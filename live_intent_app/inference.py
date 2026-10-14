@@ -1,4 +1,4 @@
-"""Cloud model and deterministic demo inference adapters."""
+"""Cloud Foundry model inference adapter."""
 
 from __future__ import annotations
 

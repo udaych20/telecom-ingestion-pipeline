@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import io
 import os
 import re
 import threading
@@ -83,53 +82,8 @@ class LocalCsvSink:
         return set(self.ledger.read_text(encoding="utf-8").splitlines())
 
 
-class AzureBlobCsvSink:
-    """Writes one immutable CSV object per event, safe for concurrent workers."""
-
-    def __init__(self) -> None:
-        from azure.identity import DefaultAzureCredential
-        from azure.storage.blob import BlobServiceClient
-
-        account_url = required("CSV_BLOB_ACCOUNT_URL")
-        self.container = required("CSV_BLOB_CONTAINER")
-        self.prefix = os.getenv("CSV_BLOB_PREFIX", "live-intent").strip("/")
-        credential = DefaultAzureCredential()
-        self.client = BlobServiceClient(account_url, credential=credential)
-
-    def save(self, row: dict[str, Any]) -> bool:
-        buffer = io.StringIO(newline="")
-        writer = csv.DictWriter(buffer, fieldnames=CSV_FIELDS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerow(row)
-        name = f"{self.prefix}/{row['event_id']}.csv"
-        blob = self.client.get_blob_client(self.container, name)
-
-        try:
-            blob.upload_blob(
-                buffer.getvalue().encode("utf-8-sig"),
-                overwrite=False,
-            )
-            return True
-        except Exception as error:
-            if getattr(error, "status_code", None) == 409:
-                return False
-            raise
-
-
-def required(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if not value:
-        raise ValueError(f"{name} is required")
-    return value
-
-
 def configured_sink() -> ResultSink:
-    kind = os.getenv("CSV_SINK", "local").strip().lower()
-    if kind == "local":
-        return LocalCsvSink(os.getenv("CSV_OUTPUT", "output/live_intent.csv"))
-    if kind == "blob":
-        return AzureBlobCsvSink()
-    raise ValueError("CSV_SINK must be local or blob")
+    return LocalCsvSink(os.getenv("CSV_OUTPUT", "output/live_intent.csv"))
 
 
 class LiveIntentPipeline:

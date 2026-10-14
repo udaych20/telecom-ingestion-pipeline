@@ -1,4 +1,4 @@
-"""Event Hubs and Kafka producers/consumers."""
+"""Kafka producer and consumer helpers."""
 
 from __future__ import annotations
 
@@ -18,26 +18,8 @@ def required(name: str) -> str:
     return value
 
 
-class EventHubPublisher:
-    def __init__(self) -> None:
-        from azure.eventhub import EventData, EventHubProducerClient
-        from azure.identity import DefaultAzureCredential
-
-        self.event_data = EventData
-        self.client = EventHubProducerClient(
-            fully_qualified_namespace=required("EVENT_HUB_NAMESPACE"),
-            eventhub_name=required("EVENT_HUB_NAME"),
-            credential=DefaultAzureCredential(),
-        )
-
-    def publish(self, event: dict[str, Any], key: str) -> None:
-        batch = self.client.create_batch(partition_key=key)
-        batch.add(self.event_data(json.dumps(event, ensure_ascii=False)))
-        self.client.send_batch(batch)
-
-
 def kafka_options() -> dict[str, Any]:
-    protocol = os.getenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL").upper()
+    protocol = os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT").upper()
     servers = [
         server.strip()
         for server in required("KAFKA_BOOTSTRAP_SERVERS").split(",")
@@ -76,9 +58,4 @@ class KafkaPublisher:
 
 
 def configured_publisher() -> Publisher:
-    kind = os.getenv("STREAM_TRANSPORT", "eventhub").strip().lower()
-    if kind == "eventhub":
-        return EventHubPublisher()
-    if kind == "kafka":
-        return KafkaPublisher()
-    raise ValueError("STREAM_TRANSPORT must be eventhub or kafka")
+    return KafkaPublisher()

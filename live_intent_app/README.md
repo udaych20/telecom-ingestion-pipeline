@@ -13,7 +13,8 @@ Azure Cosmos DB insert/update
 
 The existing `../intent_app.py` is unchanged. Run all commands from this folder.
 
-Follow [QUICKSTART_WINDOWS.md](QUICKSTART_WINDOWS.md) for the end-to-end test.
+Follow [QUICKSTART_WINDOWS.md](QUICKSTART_WINDOWS.md) for the end-to-end test,
+verification, and targeted change-feed bypass.
 
 ## Main files
 
@@ -22,7 +23,9 @@ Follow [QUICKSTART_WINDOWS.md](QUICKSTART_WINDOWS.md) for the end-to-end test.
 - `kafka_worker.py` consumes Kafka events and invokes inference.
 - `inference.py` calls the Cloud Foundry OpenAI-compatible endpoint.
 - `pipeline.py` masks PII and saves inference results to CSV.
-- `provision.py` creates missing Azure resources.
+- `replay_cosmos_to_kafka.py` bypasses only a failed change feed/local Function.
+- `verify_demo.py` reports evidence for each owned stage.
+- `provision.py` creates missing Cosmos and Function-storage resources.
 - `scripts/setup-openjdk-kafka.ps1` installs verified OpenJDK and Kafka archives.
 - `scripts/start-kafka.ps1` starts the local Kafka broker.
 - `scripts/create-kafka-topic.ps1` creates the application topic.
