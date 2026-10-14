@@ -23,13 +23,22 @@ model inference. Source and conversation IDs are SHA-256 hashed in output.
 
 ## Run without external access
 
-From the repository root in PowerShell:
+Enter the application directory, install its dependencies, and create its local
+configuration file:
+
+```powershell
+cd D:\git\telecom-ingestion-pipeline\live_intent_app
+..\.venv\Scripts\python.exe -m pip install -r .\requirements.txt
+Copy-Item .\.env.example .\.env
+```
+
+Then start the demo:
 
 ```powershell
 $env:MODEL_PROVIDER = "demo"
 $env:CSV_SINK = "local"
-$env:CSV_OUTPUT = "live_intent_app/output/live_intent.csv"
-python -m live_intent_app.demo_service
+$env:CSV_OUTPUT = "output/live_intent.csv"
+..\.venv\Scripts\python.exe -m live_intent_app.demo_service
 ```
 
 Then submit the same document shape that Cosmos will provide:
@@ -52,8 +61,15 @@ deduplicated. Change `_etag` to simulate a Cosmos update.
    `/id`. Grant the Function managed identity Cosmos data access, Event Hubs
    sender/receiver access, and Blob Data Contributor access.
 3. Create an Event Hub and the `live-intent-inference` consumer group.
-4. From this directory run `pip install -r requirements.txt`, `func start` for a
-   local check, then `func azure functionapp publish <app-name>`.
+4. From the `live_intent_app` directory, install `requirements.txt`, run
+   `func start` for a local check, then publish the Function App.
+
+```powershell
+..\.venv\Scripts\python.exe -m pip install -r .\requirements.txt
+func start
+# After the local check, stop the host with Ctrl+C.
+func azure functionapp publish <app-name>
+```
 
 The Cosmos trigger publishes inserts and updates. Event Hubs invokes the
 subscriber in the same Function App. Use `CSV_SINK=blob` for scale-out; each event
@@ -68,14 +84,14 @@ Install the Azure CLI, sign in with `az login`, copy `.env.example` to `.env`,
 and fill the `AZURE_*` and resource-name settings. Preview the operations first:
 
 ```powershell
-python -m live_intent_app.provision --dry-run
+..\.venv\Scripts\python.exe -m live_intent_app.provision --dry-run
 ```
 
 Create any missing resource group, serverless Cosmos account, database, eight
 source/lease containers, Event Hubs namespace, hub, and consumer group:
 
 ```powershell
-python -m live_intent_app.provision
+..\.venv\Scripts\python.exe -m live_intent_app.provision
 ```
 
 The command is idempotent: existing resources are retained. If
@@ -94,7 +110,7 @@ Set `STREAM_TRANSPORT=kafka` on the Azure Function publisher and configure the
 `KAFKA_*` variables. Run inference on a host that can reach the brokers:
 
 ```powershell
-python -m live_intent_app.kafka_worker
+..\.venv\Scripts\python.exe -m live_intent_app.kafka_worker
 ```
 
 Kafka offsets are committed only after inference and CSV persistence succeed.
@@ -116,5 +132,7 @@ key header, set `MODEL_API_KEY_HEADER`; its default is `Authorization: Bearer`.
 ## Verification
 
 ```powershell
-python -m unittest discover -s live_intent_app/tests -v
+..\.venv\Scripts\python.exe -m unittest discover `
+    -s .\tests `
+    -v
 ```

@@ -5,10 +5,10 @@ This guide provides two tests:
 1. A permission-free REST demo with no Azure, Cosmos DB, Kafka, or model access.
 2. A local native-Windows Kafka test with no Docker.
 
-Run all commands from the repository root:
+Use `live_intent_app` as the working directory for every application command:
 
 ```powershell
-cd D:\git\telecom-ingestion-pipeline
+cd D:\git\telecom-ingestion-pipeline\live_intent_app
 ```
 
 ## 1. Python setup
@@ -17,33 +17,34 @@ The repository already contains a virtual environment. Install the new project's
 dependencies into it:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r .\live_intent_app\requirements.txt
+..\.venv\Scripts\Activate.ps1
+..\.venv\Scripts\python.exe -m pip install -r .\requirements.txt
 ```
 
 If PowerShell prevents activation, you can use the virtual-environment Python
 directly instead:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r .\live_intent_app\requirements.txt
+..\.venv\Scripts\python.exe -m pip install -r .\requirements.txt
 ```
 
 Create the local configuration file:
 
 ```powershell
-Copy-Item .\live_intent_app\.env.example .\live_intent_app\.env
+Copy-Item .\.env.example .\.env
 ```
 
 Do not commit `.env`; it may contain credentials.
 
 ## 2. Permission-free REST demo
 
-For this test, change these values in `live_intent_app\.env`:
+For this test, change these values in
+`.env`:
 
 ```dotenv
 MODEL_PROVIDER=demo
 CSV_SINK=local
-CSV_OUTPUT=live_intent_app/output/live_intent.csv
+CSV_OUTPUT=output/live_intent.csv
 DEMO_HOST=127.0.0.1
 DEMO_PORT=8080
 ```
@@ -51,13 +52,13 @@ DEMO_PORT=8080
 Start the API:
 
 ```powershell
-python -m live_intent_app.demo_service
+..\.venv\Scripts\python.exe -m live_intent_app.demo_service
 ```
 
 Keep that terminal open. In a second PowerShell window:
 
 ```powershell
-cd D:\git\telecom-ingestion-pipeline
+cd D:\git\telecom-ingestion-pipeline\live_intent_app
 
 $body = @{
     id = "demo-1"
@@ -83,7 +84,7 @@ Invoke-RestMethod `
 Expected intent: `query`. Check the generated CSV:
 
 ```powershell
-Get-Content .\live_intent_app\output\live_intent.csv
+Get-Content .\output\live_intent.csv
 ```
 
 Posting the same `id` and `_etag` again is deduplicated. Change `_etag` to
@@ -146,7 +147,8 @@ Verify it:
 
 ## 4. Configure the application for local Kafka
 
-Change these values in `live_intent_app\.env`:
+Change these values in
+`.env`:
 
 ```dotenv
 STREAM_TRANSPORT=kafka
@@ -157,42 +159,42 @@ KAFKA_SECURITY_PROTOCOL=PLAINTEXT
 
 MODEL_PROVIDER=demo
 CSV_SINK=local
-CSV_OUTPUT=live_intent_app/output/live_intent.csv
+CSV_OUTPUT=output/live_intent.csv
 ```
 
 Leave the SASL username and password empty for this local-only test.
 
-Start the inference consumer from the repository root:
+Start the inference consumer from the `live_intent_app` directory:
 
 ```powershell
-python -m live_intent_app.kafka_worker
+..\.venv\Scripts\python.exe -m live_intent_app.kafka_worker
 ```
 
 Keep the worker running. Open one more terminal and publish a test change event:
 
 ```powershell
-cd D:\git\telecom-ingestion-pipeline
-.\.venv\Scripts\Activate.ps1
-python -m live_intent_app.send_test_event
+cd D:\git\telecom-ingestion-pipeline\live_intent_app
+..\.venv\Scripts\python.exe -m live_intent_app.send_test_event
 ```
 
 The worker should log the event and intent. Inspect the result:
 
 ```powershell
-Get-Content .\live_intent_app\output\live_intent.csv
+Get-Content .\output\live_intent.csv
 ```
 
 To send your own document:
 
 ```powershell
-python -m live_intent_app.send_test_event `
+..\.venv\Scripts\python.exe -m live_intent_app.send_test_event `
     --document C:\path\to\cosmos-document.json `
     --container chat-history-uat
 ```
 
 ## 5. Test the automated Azure provisioning
 
-Before running this section, update these values in `.env`:
+Before running this section, update these values in
+`.env`:
 
 ```dotenv
 AZURE_SUBSCRIPTION_ID=<subscription-id>
@@ -206,13 +208,13 @@ Sign in and preview the commands:
 
 ```powershell
 az login
-python -m live_intent_app.provision --dry-run
+..\.venv\Scripts\python.exe -m live_intent_app.provision --dry-run
 ```
 
 Create the missing resources:
 
 ```powershell
-python -m live_intent_app.provision
+..\.venv\Scripts\python.exe -m live_intent_app.provision
 ```
 
 This creates the Cosmos account, database, four source containers, four lease
@@ -269,7 +271,9 @@ routable connection.
 ## 8. Run automated tests
 
 ```powershell
-python -m unittest discover -s .\live_intent_app\tests -v
+..\.venv\Scripts\python.exe -m unittest discover `
+    -s .\tests `
+    -v
 ```
 
 Expected result: all tests pass.
