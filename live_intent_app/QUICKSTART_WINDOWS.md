@@ -36,6 +36,24 @@ Run application commands from:
 cd D:\git\telecom-ingestion-pipeline\live_intent_app
 ```
 
+After the common setup, the automated runners are:
+
+```powershell
+# Full flow; start Kafka, kafka_worker, and func first.
+.\scripts\run-demo.ps1 -Mode Live
+
+# Targeted bypass; start Kafka and kafka_worker first.
+.\scripts\run-demo.ps1 -Mode Demo
+```
+
+Each runner checks its dependencies before inserting data. Use the standalone
+check when troubleshooting:
+
+```powershell
+python -m live_intent_app.check_demo_readiness --mode live
+python -m live_intent_app.check_demo_readiness --mode demo
+```
+
 ## Common setup
 
 ### 1. Prerequisites
@@ -199,7 +217,7 @@ should report the inferred event. Check the CSV:
 Run the verifier after allowing the Function and worker to process the event:
 
 ```powershell
-python -m live_intent_app.verify_demo
+python -m live_intent_app.verify_demo --mode live
 ```
 
 It reports separate results for the Cosmos insert, change feed, local Function
@@ -255,7 +273,7 @@ local_azure_function
 Run the verifier:
 
 ```powershell
-python -m live_intent_app.verify_demo
+python -m live_intent_app.verify_demo --mode demo
 ```
 
 The Cosmos change-feed and Function stages remain

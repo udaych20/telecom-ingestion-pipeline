@@ -9,8 +9,6 @@ import os
 import uuid
 from pathlib import Path
 
-from kafka import KafkaConsumer
-
 from .contracts import build_change_event
 from .settings import load_local_environment
 from .transports import kafka_options, required
@@ -28,6 +26,8 @@ def audit_stages(path: Path, event_id: str) -> set[str]:
 
 
 def kafka_contains(event_id: str, timeout_seconds: int) -> bool:
+    from kafka import KafkaConsumer
+
     options = kafka_options()
     options.pop("client_id", None)
     consumer = KafkaConsumer(
@@ -66,6 +66,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receipt", default="output/last_cosmos_insert.json")
     parser.add_argument("--timeout", type=int, default=20)
+    parser.add_argument("--mode", choices=("live", "demo"), default=None)
     args = parser.parse_args()
 
     receipt_path = Path(args.receipt)
@@ -78,14 +79,26 @@ def main() -> None:
     )
 
     print(f"Event ID: {event_id}")
-    print_status("Cosmos insert", True, str(receipt["document"].get("id", "")))
-    print_status("Cosmos change feed", "CHANGE_FEED_RECEIVED" in stages)
-    print_status("Local Azure Function -> Kafka", "KAFKA_PUBLISHED" in stages)
-    print_status("Kafka topic", kafka_contains(event_id, args.timeout))
-    print_status(
-        "SLM inference -> intent CSV",
-        csv_contains(Path(os.getenv("CSV_OUTPUT", "output/live_intent.csv")), event_id),
-    )
+    results = {
+        "Cosmos insert": True,
+        "Cosmos change feed": "CHANGE_FEED_RECEIVED" in stages,
+        "Local Azure Function -> Kafka": "KAFKA_PUBLISHED" in stages,
+        "Kafka topic": kafka_contains(event_id, args.timeout),
+        "SLM inference -> intent CSV": csv_contains(
+            Path(os.getenv("CSV_OUTPUT", "output/live_intent.csv")), event_id
+        ),
+    }
+    for stage, passed in results.items():
+        detail = str(receipt["document"].get("id", "")) if stage == "Cosmos insert" else ""
+        print_status(stage, passed, detail)
+
+    required_stages = {"Cosmos insert", "Kafka topic", "SLM inference -> intent CSV"}
+    if args.mode == "live":
+        required_stages.update(
+            {"Cosmos change feed", "Local Azure Function -> Kafka"}
+        )
+    if args.mode and not all(results[stage] for stage in required_stages):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
