@@ -1,0 +1,12 @@
+[
+  {"id":"demo-query-01","messages":[{"type":"user","data":{"content":"Please check the status of my mobile service"}}]},
+  {"id":"demo-ticket-02","messages":[{"type":"user","data":{"content":"Open a ticket because my mobile data is not working"}}]},
+  {"id":"demo-modify-03","messages":[{"type":"user","data":{"content":"Change my current plan to the unlimited plan"}}]},
+  {"id":"demo-rca-04","messages":[{"type":"user","data":{"content":"Why did the network outage happen yesterday?"}}]},
+  {"id":"demo-general-05","messages":[{"type":"user","data":{"content":"What services are available for business customers?"}}]},
+  {"id":"demo-clarify-06","messages":[{"type":"user","data":{"content":"Please fix it"}}]},
+  {"id":"demo-query-07","messages":[{"type":"user","data":{"content":"Show my latest bill balance"}}]},
+  {"id":"demo-ticket-08","messages":[{"type":"user","data":{"content":"Create a support case for repeated call drops"}}]},
+  {"id":"demo-modify-09","messages":[{"type":"user","data":{"content":"Enable international roaming on my number"}}]},
+  {"id":"demo-rca-10","messages":[{"type":"user","data":{"content":"Explain the root cause of the slow connection"}}]}
+]

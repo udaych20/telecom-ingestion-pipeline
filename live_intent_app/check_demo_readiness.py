@@ -98,7 +98,13 @@ def check_kafka(checks: Checks) -> None:
 
 
 def check_model(checks: Checks) -> None:
-    for name in ("MODEL_ENDPOINT", "MODEL_DEPLOYMENT", "MODEL_API_KEY"):
+    azure_mode = bool(os.getenv("AZURE_OPENAI_ENDPOINT", "").strip())
+    names = (
+        ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT", "AZURE_OPENAI_API_KEY")
+        if azure_mode
+        else ("MODEL_ENDPOINT", "MODEL_DEPLOYMENT", "MODEL_API_KEY")
+    )
+    for name in names:
         passed, detail = configured(name)
         checks.report(passed, name, detail)
 
@@ -134,13 +140,18 @@ def check_functions_host(checks: Checks) -> None:
 def main() -> None:
     load_local_environment()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("live", "demo"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("live", "demo", "demo-file"),
+        required=True,
+    )
     args = parser.parse_args()
 
     checks = Checks()
     checks.report(sys.version_info >= (3, 11), "Python version", sys.version.split()[0])
     check_imports(checks)
-    check_cosmos(checks)
+    if args.mode != "demo-file":
+        check_cosmos(checks)
     check_kafka(checks)
     check_model(checks)
     if args.mode == "live":

@@ -66,7 +66,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receipt", default="output/last_cosmos_insert.json")
     parser.add_argument("--timeout", type=int, default=20)
-    parser.add_argument("--mode", choices=("live", "demo"), default=None)
+    parser.add_argument("--mode", choices=("live", "demo", "backup"), default=None)
     args = parser.parse_args()
 
     receipt_path = Path(args.receipt)
@@ -84,7 +84,7 @@ def main() -> None:
     )
     slm_inferred = "SLM_INFERRED" in stages or csv_found
     results = {
-        "Cosmos insert": True,
+        "Cosmos insert": receipt.get("insertion_evidence") != "cosmos_bypassed",
         "Cosmos change feed": "CHANGE_FEED_RECEIVED" in stages,
         "Local Azure Function": "SLM_INFERRED" in stages,
         "Cloud Foundry SLM": slm_inferred,
@@ -103,6 +103,8 @@ def main() -> None:
     }
     if args.mode == "live":
         required_stages.update({"Cosmos change feed", "Local Azure Function"})
+    if args.mode == "backup":
+        required_stages.discard("Cosmos insert")
     if args.mode and not all(results[stage] for stage in required_stages):
         raise SystemExit(1)
 

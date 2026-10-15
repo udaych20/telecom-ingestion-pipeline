@@ -1,0 +1,15 @@
+{
+  "id": "demo-001",
+  "_etag": "paste-the-etag-from-cosmos",
+  "_demo_trace_id": "demo-001",
+  "messages": [
+    {
+      "type": "user",
+      "data": {
+        "cid": "demo-001",
+        "content": "Please check the status of my mobile service"
+      }
+    }
+  ],
+  "test_record": true
+}

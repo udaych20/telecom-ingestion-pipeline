@@ -21,6 +21,7 @@ try {
     Write-Host ""
     Write-Host "Inserted record receipt:"
     Get-Content .\output\last_cosmos_insert.json
+
 }
 finally {
     Pop-Location

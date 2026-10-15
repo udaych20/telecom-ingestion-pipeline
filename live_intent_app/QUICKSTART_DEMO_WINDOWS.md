@@ -46,6 +46,12 @@ MODEL_DEPLOYMENT=YOUR-SLM
 MODEL_API_KEY=YOUR-MODEL-KEY
 MODEL_API_KEY_HEADER=Authorization
 
+# Or use Azure OpenAI for the SLM (do not configure both blocks):
+# AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com
+# AZURE_OPENAI_DEPLOYMENT=YOUR-SLM-DEPLOYMENT
+# AZURE_OPENAI_API_KEY=YOUR-KEY
+# AZURE_OPENAI_API_VERSION=2024-10-21
+
 CSV_OUTPUT=output/live_intent.csv
 
 KAFKA_BOOTSTRAP_SERVERS=localhost:9092
@@ -70,12 +76,18 @@ Keep it running. Create the topic once in another terminal:
 ## 3. Check demo dependencies
 
 ```powershell
+# When Python can read Cosmos:
 python -m live_intent_app.check_demo_readiness --mode demo
+
+# When using JSON copied from Azure Data Explorer:
+python -m live_intent_app.check_demo_readiness --mode demo-file
 ```
 
 Fix every `FAIL` before continuing.
 
-## 4. Insert the Cosmos record separately
+## 4. Provide the Cosmos record
+
+### Option A — Python identity has Cosmos access
 
 ```powershell
 .\scripts\insert-cosmos-demo.ps1 `
@@ -86,14 +98,67 @@ Fix every `FAIL` before continuing.
 This saves the exact inserted record receipt to
 `output/last_cosmos_insert.json`.
 
-## 5. Run and verify the demo flow
+Configure the common 10-event JSON batch in `.env`. The flag selects its source
+path:
+
+```dotenv
+DEMO_SLM_BACKUP_ENABLED=true
+DEMO_BATCH_SIZE=10
+DEMO_DOCUMENT_DIR=input/demo-events
+```
+
+With `DEMO_SLM_BACKUP_ENABLED=false`, run both commands:
+
+```powershell
+.\scripts\insert-cosmos-demo.ps1 -Container chat-history-uat
+.\scripts\run-demo-flow.ps1
+```
+
+The first command inserts all 10 JSON events into Cosmos. The second reads those
+inserted records and runs SLM inference, CSV persistence, and Kafka publishing.
+
+With `DEMO_SLM_BACKUP_ENABLED=true`, Cosmos insertion is skipped. Run only:
 
 ```powershell
 .\scripts\run-demo-flow.ps1
 ```
 
-The script reads the receipt, retrieves that exact record from Cosmos, invokes
-the SLM, writes CSV, publishes the enriched result to Kafka, and verifies it.
+The runner reads the same 10 JSON events directly and performs SLM inference,
+CSV persistence, and Kafka publishing without writing to Cosmos.
+
+### Option B — record was inserted in Azure Data Explorer
+
+The demo cannot automatically discover a browser-inserted record without
+Cosmos read permission. In Azure Data Explorer, open the inserted item and copy
+the complete JSON, including `id`, `_etag`, and `_ts`, into a local file such as:
+
+```text
+output/browser_cosmos_document.json
+```
+
+Use [demo_document.example.json](demo_document.example.json) as the shape
+reference. Do not wrap the document in another JSON object.
+
+## 5. Run and verify the demo flow
+
+For Option A:
+
+```powershell
+.\scripts\run-demo-flow.ps1
+```
+
+For Option B, which requires no Python Cosmos permission:
+
+```powershell
+.\scripts\run-demo-flow.ps1 `
+    -DocumentFile .\output\browser_cosmos_document.json `
+    -Container chat-history-uat
+```
+
+The script registers the exact exported document, invokes the SLM, writes CSV,
+publishes the enriched user-intent result to Kafka for ontology consumers, and
+verifies it. Kafka publish is skipped unless a new CSV row is saved. With Option A, it reads
+the receipt and retrieves the exact record from Cosmos first.
 
 Expected result:
 
