@@ -13,8 +13,10 @@ Azure Cosmos DB insert/update
 
 The existing `../intent_app.py` is unchanged. Run all commands from this folder.
 
-Follow [QUICKSTART_WINDOWS.md](QUICKSTART_WINDOWS.md) for the end-to-end test,
-verification, and targeted change-feed bypass.
+Choose the appropriate standalone guide:
+
+- [QUICKSTART_LIVE_WINDOWS.md](QUICKSTART_LIVE_WINDOWS.md) for the actual flow.
+- [QUICKSTART_DEMO_WINDOWS.md](QUICKSTART_DEMO_WINDOWS.md) for the bypass flow.
 
 ## Main files
 
@@ -29,7 +31,9 @@ verification, and targeted change-feed bypass.
 - `scripts/setup-openjdk-kafka.ps1` installs verified OpenJDK and Kafka archives.
 - `scripts/start-kafka.ps1` starts the local Kafka broker.
 - `scripts/create-kafka-topic.ps1` creates the application topic.
-- `scripts/run-demo.ps1` runs either the live or targeted-bypass demonstration.
+- `scripts/insert-cosmos-demo.ps1` inserts and displays one Cosmos demo record.
+- `scripts/run-live-flow.ps1` waits for and verifies the live Function flow.
+- `scripts/run-demo-flow.ps1` runs and verifies the targeted bypass.
 
 The model must return JSON containing `intent`, `confidence`, and `reason`.
 Allowed intents are `ticket`, `modify`, `rca`, `query`, `general`, and
