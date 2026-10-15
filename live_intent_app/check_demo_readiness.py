@@ -34,7 +34,7 @@ def configured(name: str) -> tuple[bool, str]:
 
 
 def check_imports(checks: Checks) -> None:
-    modules = ("azure.cosmos", "azure.identity", "kafka", "dotenv")
+    modules = ("azure.cosmos", "azure.identity", "kafka", "dotenv", "openai")
     missing = []
     for module in modules:
         try:

@@ -3,4 +3,5 @@ azure-cosmos
 azure-identity
 kafka-python>=3,<4
 python-dotenv
+openai>=1,<3
 -e .

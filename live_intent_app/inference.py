@@ -6,7 +6,6 @@ import json
 import os
 import urllib.error
 import urllib.request
-from urllib.parse import quote, urlencode
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -83,6 +82,9 @@ class FoundryModel:
 
     def _parse_response(self, payload: dict[str, Any]) -> Inference:
         content = payload["choices"][0]["message"]["content"]
+        return self._parse_content(content)
+
+    def _parse_content(self, content: str) -> Inference:
         result = json.loads(content)
         intent = str(result.get("intent", "")).strip().lower()
         if intent not in INTENTS:
@@ -100,43 +102,38 @@ class AzureOpenAIModel(FoundryModel):
     """Calls an Azure OpenAI chat deployment used as the demo SLM."""
 
     def __init__(self) -> None:
+        from openai import AzureOpenAI
+
         self.endpoint = required("AZURE_OPENAI_ENDPOINT").rstrip("/")
         self.deployment = required("AZURE_OPENAI_DEPLOYMENT")
         self.api_key = required("AZURE_OPENAI_API_KEY")
         self.api_version = os.getenv(
             "AZURE_OPENAI_API_VERSION", "2024-10-21"
         ).strip()
-        self.timeout = float(os.getenv("MODEL_TIMEOUT_SECONDS", "30"))
+        self.client = AzureOpenAI(
+            azure_endpoint=self.endpoint,
+            api_key=self.api_key,
+            api_version=self.api_version,
+            max_retries=0,
+        )
 
     def infer(self, text: str) -> Inference:
-        deployment = quote(self.deployment, safe="")
-        query = urlencode({"api-version": self.api_version})
-        url = (
-            f"{self.endpoint}/openai/deployments/{deployment}/chat/completions"
-            f"?{query}"
-        )
-        request_body = {
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": text},
-            ],
-        }
-        request = urllib.request.Request(
-            url,
-            json.dumps(request_body).encode("utf-8"),
-            {"Content-Type": "application/json", "api-key": self.api_key},
-        )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.load(response)
-        except urllib.error.HTTPError as error:
-            detail = error.read(2048).decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"Azure OpenAI request failed ({error.code}): {detail}"
-            ) from error
-        return self._parse_response(payload)
+            response = self.client.chat.completions.create(
+                model=self.deployment,
+                temperature=0,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": text},
+                ],
+            )
+        except Exception as error:
+            raise RuntimeError(f"Azure OpenAI request failed: {error}") from error
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("Azure OpenAI returned an empty response")
+        return self._parse_content(content)
 
 
 def required(name: str) -> str:

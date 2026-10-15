@@ -74,14 +74,12 @@ class LivePipelineTests(unittest.TestCase):
         )
         self.assertNotEqual(batch[0]["document"]["_etag"], "cosmos-managed")
 
-    @patch("live_intent_app.inference.urllib.request.urlopen")
-    def test_azure_openai_slm_uses_deployment_url_and_api_key(self, urlopen):
-        response = urlopen.return_value.__enter__.return_value
-        response.read.return_value = json.dumps(
-            {"choices": [{"message": {"content": json.dumps({
-                "intent": "query", "confidence": 0.93, "reason": "status"
-            })}}]}
-        ).encode()
+    @patch("openai.AzureOpenAI")
+    def test_azure_openai_slm_uses_sdk_client_and_deployment(self, client_type):
+        response = client_type.return_value.chat.completions.create.return_value
+        response.choices[0].message.content = json.dumps({
+            "intent": "query", "confidence": 0.93, "reason": "status"
+        })
         with patch.dict(os.environ, {
             "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com/",
             "AZURE_OPENAI_DEPLOYMENT": "demo slm",
@@ -92,10 +90,14 @@ class LivePipelineTests(unittest.TestCase):
             prediction = model.infer("check status")
 
         self.assertIsInstance(model, AzureOpenAIModel)
-        request = urlopen.call_args.args[0]
-        self.assertIn("/deployments/demo%20slm/chat/completions", request.full_url)
-        self.assertIn("api-version=2024-10-21", request.full_url)
-        self.assertEqual(request.headers["Api-key"], "secret-for-test")
+        client_type.assert_called_once_with(
+            azure_endpoint="https://example.openai.azure.com",
+            api_key="secret-for-test",
+            api_version="2024-10-21",
+            max_retries=0,
+        )
+        call = client_type.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(call["model"], "demo slm")
         self.assertEqual(prediction.intent, "query")
 
     def test_document_is_inferred_and_written_once(self):
