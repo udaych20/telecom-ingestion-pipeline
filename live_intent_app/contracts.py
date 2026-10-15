@@ -51,13 +51,29 @@ def attach_intent_result(
     event: dict[str, Any],
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    """Attach the completed SLM result before broadcasting the event."""
-    event["type"] = "com.telecom.cosmos.intent.inferred"
-    event["data"]["intent_result"] = {
-        key: value for key, value in result.items() if key != "saved"
+    """Build a minimal Kafka event containing only user content and intent."""
+    output = {
+        key: event[key]
+        for key in ("specversion", "id", "source", "time", "datacontenttype")
+        if key in event
     }
-    event["data"]["csv_saved"] = bool(result.get("saved"))
-    return event
+    output["type"] = "com.telecom.user.intent.inferred"
+    output["data"] = {
+        "message": {
+            "type": "user",
+            "data": {"content": str(result.get("user_text", ""))},
+        },
+        "intent_result": {
+            key: result[key]
+            for key in ("intent", "confidence", "reason", "model")
+            if key in result
+        },
+        "csv_saved": bool(result.get("saved")),
+    }
+    if event.get("demo_bypass"):
+        output["demo_bypass"] = True
+        output["bypassed_stages"] = list(event.get("bypassed_stages", []))
+    return output
 
 
 def validate_event(event: Any) -> dict[str, Any]:

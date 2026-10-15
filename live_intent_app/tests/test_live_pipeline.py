@@ -18,6 +18,7 @@ from live_intent_app.inference import (
     configured_model,
     normalize_confidence,
 )
+from live_intent_app.extraction import extract_user_text
 from live_intent_app.insert_cosmos_test_document import build_document
 from live_intent_app.insert_cosmos_test_document import main as insert_demo_main
 from live_intent_app.pipeline import LiveIntentPipeline, LocalCsvSink
@@ -30,6 +31,17 @@ class TestModel:
 
 
 class LivePipelineTests(unittest.TestCase):
+    def test_inference_text_uses_only_user_data_content(self):
+        document = {
+            "content": "ignore root content",
+            "messages": [
+                {"type": "user", "data": {"content": "process this intent"}},
+                {"type": "assistant", "data": {"content": "ignore assistant"}},
+            ],
+        }
+
+        self.assertEqual(extract_user_text(document), "process this intent")
+
     def test_confidence_accepts_numeric_percent_and_labels(self):
         self.assertEqual(normalize_confidence(0.82), 0.82)
         self.assertEqual(normalize_confidence("82%"), 0.82)
@@ -170,6 +182,7 @@ class LivePipelineTests(unittest.TestCase):
         event = build_change_event("chat", {"id": "1", "_etag": "a"})
         result = {
             "event_id": event["id"],
+            "user_text": "Check my service status",
             "intent": "query",
             "confidence": "0.9100",
             "reason": "Test prediction",
@@ -179,10 +192,16 @@ class LivePipelineTests(unittest.TestCase):
 
         output = attach_intent_result(event, result)
 
-        self.assertEqual(output["type"], "com.telecom.cosmos.intent.inferred")
+        self.assertEqual(output["type"], "com.telecom.user.intent.inferred")
         self.assertEqual(output["data"]["intent_result"]["intent"], "query")
+        self.assertEqual(
+            output["data"]["message"],
+            {"type": "user", "data": {"content": "Check my service status"}},
+        )
         self.assertTrue(output["data"]["csv_saved"])
         self.assertNotIn("saved", output["data"]["intent_result"])
+        self.assertNotIn("document", output["data"])
+        self.assertNotIn("container", output["data"])
 
     @patch("live_intent_app.replay_cosmos_to_kafka.KafkaPublisher")
     @patch("live_intent_app.replay_cosmos_to_kafka.LiveIntentPipeline")
@@ -193,6 +212,7 @@ class LivePipelineTests(unittest.TestCase):
             or {
                 "event_id": event["id"], "intent": "query", "confidence": "0.9100",
                 "reason": "status request", "model": "slm", "saved": True,
+                "user_text": "status",
             }
         )
         publisher_type.return_value.publish.side_effect = lambda event, key: calls.append("kafka")
@@ -204,6 +224,7 @@ class LivePipelineTests(unittest.TestCase):
 
         self.assertEqual(calls, ["csv", "kafka"])
         self.assertEqual(event["data"]["intent_result"]["intent"], "query")
+        self.assertEqual(event["data"]["message"]["data"]["content"], "status")
         self.assertTrue(event["data"]["csv_saved"])
 
     @patch("live_intent_app.replay_cosmos_to_kafka.KafkaPublisher")

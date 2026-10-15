@@ -68,13 +68,13 @@ def publish_changes(documents: func.DocumentList, container: str) -> None:
             result["saved"],
         )
         output_event = attach_intent_result(event, result)
-        publisher().publish(output_event, partition_key)
+        publisher().publish(output_event, str(output_event["id"]))
         write_demo_audit("KAFKA_PUBLISHED", event, partition_key)
         LOGGER.info(
             "KAFKA_PUBLISHED event_id=%s topic=%s partition_key=%s",
             output_event["id"],
             os.getenv("KAFKA_TOPIC", "cosmos-changes"),
-            partition_key,
+            output_event["id"],
         )
 
 

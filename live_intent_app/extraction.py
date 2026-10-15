@@ -68,47 +68,23 @@ def find_first(value: Any, fields: Iterable[str]) -> Any:
 
 
 def extract_user_text(document: dict[str, Any]) -> str:
-    """Return the most recent user message from a Cosmos document."""
-    for owner in (document, document.get("conversation", {})):
-        if not isinstance(owner, dict):
+    """Return only the latest messages[type=user].data.content value."""
+    messages = document.get("messages")
+    if not isinstance(messages, list):
+        return ""
+    user_messages = []
+    for message in messages:
+        if not isinstance(message, dict):
             continue
-        for key in ("messages", "history"):
-            messages = owner.get(key)
-            if not isinstance(messages, list):
-                continue
-            user_messages = []
-            for message in messages:
-                if not isinstance(message, dict):
-                    continue
-                data = message.get("data")
-                if not isinstance(data, dict):
-                    data = {}
-
-                role = str(
-                    message.get("role")
-                    or message.get("type")
-                    or data.get("role")
-                    or data.get("type")
-                    or ""
-                ).lower()
-                if role in {"user", "customer", "human"}:
-                    text = compact(
-                        message.get("content")
-                        or message.get("text")
-                        or data.get("content")
-                        or data.get("text")
-                    )
-                    if text:
-                        user_messages.append(text)
-
-            if user_messages:
-                return user_messages[-1]
-
-    user_input = parse_json(document.get("user_inputs"))
-    fallback = find_first(user_input, MESSAGE_FIELDS + ISSUE_FIELDS)
-    if fallback is None:
-        fallback = find_first(document, MESSAGE_FIELDS)
-    return compact(fallback)
+        if str(message.get("type", "")).lower() != "user":
+            continue
+        data = message.get("data")
+        if not isinstance(data, dict):
+            continue
+        text = compact(data.get("content"))
+        if text:
+            user_messages.append(text)
+    return user_messages[-1] if user_messages else ""
 
 
 def conversation_id(document: dict[str, Any]) -> str:
