@@ -4,7 +4,8 @@ import os
 import tempfile
 import unittest
 import sys
-from unittest.mock import patch
+import types
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from live_intent_app.contracts import (
@@ -23,6 +24,7 @@ from live_intent_app.insert_cosmos_test_document import build_document
 from live_intent_app.insert_cosmos_test_document import main as insert_demo_main
 from live_intent_app.pipeline import LiveIntentPipeline, LocalCsvSink
 from live_intent_app.replay_cosmos_to_kafka import infer_save_and_publish
+from live_intent_app.transports import KafkaPublisher
 
 
 class TestModel:
@@ -31,6 +33,24 @@ class TestModel:
 
 
 class LivePipelineTests(unittest.TestCase):
+    def test_kafka_publishes_plain_user_content_only(self):
+        producer_type = Mock()
+        producer_type.return_value.send.return_value.get.return_value = None
+        kafka_module = types.SimpleNamespace(KafkaProducer=producer_type)
+        with patch.dict(sys.modules, {"kafka": kafka_module}), patch.dict(os.environ, {
+            "KAFKA_BOOTSTRAP_SERVERS": "localhost:9092",
+            "KAFKA_TOPIC": "live-intent",
+            "KAFKA_SECURITY_PROTOCOL": "PLAINTEXT",
+        }):
+            publisher = KafkaPublisher()
+            publisher.publish("only this user content", "event-key")
+
+        producer_type.return_value.send.assert_called_once_with(
+            "live-intent",
+            key=b"event-key",
+            value=b"only this user content",
+        )
+
     def test_inference_text_uses_only_user_data_content(self):
         document = {
             "content": "ignore root content",
@@ -223,6 +243,9 @@ class LivePipelineTests(unittest.TestCase):
         )
 
         self.assertEqual(calls, ["csv", "kafka"])
+        publisher_type.return_value.publish.assert_called_once_with(
+            "status", event["id"]
+        )
         self.assertEqual(event["data"]["intent_result"]["intent"], "query")
         self.assertEqual(event["data"]["message"]["data"]["content"], "status")
         self.assertTrue(event["data"]["csv_saved"])

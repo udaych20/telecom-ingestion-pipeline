@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 
 class Publisher(Protocol):
-    def publish(self, event: dict[str, Any], key: str) -> None: ...
+    def publish(self, message: Any, key: str) -> None: ...
 
 
 def required(name: str) -> str:
@@ -48,11 +48,16 @@ class KafkaPublisher:
         self.topic = required("KAFKA_TOPIC")
         self.client = KafkaProducer(acks="all", retries=5, **kafka_options())
 
-    def publish(self, event: dict[str, Any], key: str) -> None:
+    def publish(self, message: Any, key: str) -> None:
+        value = (
+            message.encode("utf-8")
+            if isinstance(message, str)
+            else json.dumps(message).encode("utf-8")
+        )
         result = self.client.send(
             self.topic,
             key=key.encode("utf-8"),
-            value=json.dumps(event).encode("utf-8"),
+            value=value,
         )
         result.get(timeout=30)
 

@@ -54,7 +54,7 @@ def infer_save_and_publish(document: dict, container_name: str) -> tuple[dict, d
             "Intent row was not newly saved to CSV; Kafka publish was skipped"
         )
     output_event = attach_intent_result(event, result)
-    KafkaPublisher().publish(output_event, str(output_event["id"]))
+    KafkaPublisher().publish(result["user_text"], str(event["id"]))
     return result, output_event
 
 

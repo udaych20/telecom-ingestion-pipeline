@@ -10,6 +10,8 @@ import uuid
 from pathlib import Path
 
 from .contracts import build_change_event
+from .extraction import extract_user_text
+from .pipeline import mask_text
 from .settings import load_local_environment
 from .transports import kafka_options, required
 
@@ -25,7 +27,7 @@ def audit_stages(path: Path, event_id: str) -> set[str]:
     return stages
 
 
-def kafka_contains(event_id: str, timeout_seconds: int) -> bool:
+def kafka_contains(event_id: str, expected_content: str, timeout_seconds: int) -> bool:
     from kafka import KafkaConsumer
 
     options = kafka_options()
@@ -40,8 +42,14 @@ def kafka_contains(event_id: str, timeout_seconds: int) -> bool:
     )
     try:
         for message in consumer:
-            event = json.loads(message.value.decode("utf-8"))
-            if event.get("id") == event_id:
+            value = message.value.decode("utf-8")
+            if value == expected_content:
+                return True
+            try:
+                event = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict) and event.get("id") == event_id:
                 return True
     finally:
         consumer.close()
@@ -73,6 +81,7 @@ def main() -> None:
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     event = build_change_event(receipt["container"], receipt["document"])
     event_id = event["id"]
+    expected_content = mask_text(extract_user_text(receipt["document"]))
     stages = audit_stages(
         Path(os.getenv("DEMO_AUDIT_OUTPUT", "output/change_feed_audit.jsonl")),
         event_id,
@@ -89,7 +98,7 @@ def main() -> None:
         "Local Azure Function": "SLM_INFERRED" in stages,
         "Cloud Foundry SLM": slm_inferred,
         "Intent CSV": csv_found,
-        "Kafka result topic": kafka_contains(event_id, args.timeout),
+        "Kafka result topic": kafka_contains(event_id, expected_content, args.timeout),
     }
     for stage, passed in results.items():
         detail = str(receipt["document"].get("id", "")) if stage == "Cosmos insert" else ""
