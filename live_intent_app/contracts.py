@@ -47,6 +47,19 @@ def mark_demo_bypass(event: dict[str, Any]) -> dict[str, Any]:
     return event
 
 
+def attach_intent_result(
+    event: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Attach the completed SLM result before broadcasting the event."""
+    event["type"] = "com.telecom.cosmos.intent.inferred"
+    event["data"]["intent_result"] = {
+        key: value for key, value in result.items() if key != "saved"
+    }
+    event["data"]["csv_saved"] = bool(result.get("saved"))
+    return event
+
+
 def validate_event(event: Any) -> dict[str, Any]:
     if not isinstance(event, dict):
         raise ValueError("Event must be a JSON object")

@@ -21,7 +21,7 @@ try {
     }
 
     if ($Mode -eq "Live") {
-        Write-Host "Live mode requires func start and kafka_worker in separate terminals."
+        Write-Host "Live mode requires func start in a separate terminal."
     }
 
     Write-Host "Inserting a unique test document into Cosmos DB..."
@@ -33,7 +33,7 @@ try {
     }
 
     if ($Mode -eq "Demo") {
-        Write-Host "Bypassing only the change feed and local Azure Function..."
+        Write-Host "Running SLM and CSV directly, then publishing the result to Kafka..."
         python -m live_intent_app.replay_cosmos_to_kafka
         if ($LASTEXITCODE -ne 0) {
             throw "Cosmos-to-Kafka replay failed."

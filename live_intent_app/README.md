@@ -6,9 +6,9 @@ This project implements one live processing flow:
 Azure Cosmos DB insert/update
   -> Cosmos change feed
   -> Azure Function running locally
-  -> Kafka running on Windows
   -> Cloud Foundry SLM
   -> CSV
+  -> Kafka running on Windows
 ```
 
 The existing `../intent_app.py` is unchanged. Run all commands from this folder.
@@ -19,11 +19,10 @@ verification, and targeted change-feed bypass.
 ## Main files
 
 - `insert_cosmos_test_document.py` inserts a unique Cosmos test conversation.
-- `function_app.py` handles the change feed and publishes to Kafka.
-- `kafka_worker.py` consumes Kafka events and invokes inference.
+- `function_app.py` handles the change feed, inference, CSV, and Kafka publish.
 - `inference.py` calls the Cloud Foundry OpenAI-compatible endpoint.
 - `pipeline.py` masks PII and saves inference results to CSV.
-- `replay_cosmos_to_kafka.py` bypasses only a failed change feed/local Function.
+- `replay_cosmos_to_kafka.py` runs inference and CSV before the demo Kafka publish.
 - `check_demo_readiness.py` checks external dependencies before a demonstration.
 - `verify_demo.py` reports evidence for each owned stage.
 - `provision.py` creates missing Cosmos and Function-storage resources.

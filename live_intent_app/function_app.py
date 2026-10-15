@@ -1,4 +1,4 @@
-"""Azure Function entry point: Cosmos change feed to Kafka."""
+"""Azure Function: Cosmos change feed to SLM, CSV, and Kafka."""
 
 from __future__ import annotations
 
@@ -14,12 +14,14 @@ from live_intent_app.settings import load_local_environment
 
 load_local_environment()
 
-from live_intent_app.contracts import build_change_event
+from live_intent_app.contracts import attach_intent_result, build_change_event
+from live_intent_app.pipeline import LiveIntentPipeline
 from live_intent_app.transports import Publisher, configured_publisher
 
 app = func.FunctionApp()
 LOGGER = logging.getLogger("live_intent")
 _publisher: Publisher | None = None
+_pipeline: LiveIntentPipeline | None = None
 _lock = threading.Lock()
 _audit_lock = threading.Lock()
 
@@ -31,6 +33,15 @@ def publisher() -> Publisher:
             if _publisher is None:
                 _publisher = configured_publisher()
     return _publisher
+
+
+def pipeline() -> LiveIntentPipeline:
+    global _pipeline
+    if _pipeline is None:
+        with _lock:
+            if _pipeline is None:
+                _pipeline = LiveIntentPipeline()
+    return _pipeline
 
 
 def publish_changes(documents: func.DocumentList, container: str) -> None:
@@ -47,11 +58,21 @@ def publish_changes(documents: func.DocumentList, container: str) -> None:
             document.get("id", ""),
             document.get("_demo_trace_id", ""),
         )
-        publisher().publish(event, partition_key)
+        result = pipeline().process(event)
+        write_demo_audit("SLM_INFERRED", event, partition_key)
+        write_demo_audit("CSV_WRITTEN", event, partition_key)
+        LOGGER.info(
+            "SLM_INFERRED event_id=%s intent=%s csv_saved=%s",
+            event["id"],
+            result["intent"],
+            result["saved"],
+        )
+        output_event = attach_intent_result(event, result)
+        publisher().publish(output_event, partition_key)
         write_demo_audit("KAFKA_PUBLISHED", event, partition_key)
         LOGGER.info(
             "KAFKA_PUBLISHED event_id=%s topic=%s partition_key=%s",
-            event["id"],
+            output_event["id"],
             os.getenv("KAFKA_TOPIC", "cosmos-changes"),
             partition_key,
         )

@@ -3,7 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from live_intent_app.contracts import build_change_event, mark_demo_bypass
+from live_intent_app.contracts import (
+    attach_intent_result,
+    build_change_event,
+    mark_demo_bypass,
+)
 from live_intent_app.inference import Inference
 from live_intent_app.insert_cosmos_test_document import build_document
 from live_intent_app.pipeline import LiveIntentPipeline, LocalCsvSink
@@ -68,6 +72,24 @@ class LivePipelineTests(unittest.TestCase):
             event["bypassed_stages"],
             ["cosmos_change_feed", "local_azure_function"],
         )
+
+    def test_intent_result_is_attached_before_kafka_publish(self):
+        event = build_change_event("chat", {"id": "1", "_etag": "a"})
+        result = {
+            "event_id": event["id"],
+            "intent": "query",
+            "confidence": "0.9100",
+            "reason": "Test prediction",
+            "model": "test-model",
+            "saved": True,
+        }
+
+        output = attach_intent_result(event, result)
+
+        self.assertEqual(output["type"], "com.telecom.cosmos.intent.inferred")
+        self.assertEqual(output["data"]["intent_result"]["intent"], "query")
+        self.assertTrue(output["data"]["csv_saved"])
+        self.assertNotIn("saved", output["data"]["intent_result"])
 
 
 if __name__ == "__main__":

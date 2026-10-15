@@ -1,4 +1,4 @@
-"""Replay one inserted Cosmos document to Kafka for the demo bypass."""
+"""Infer one Cosmos document, save CSV, then publish it for the demo bypass."""
 
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ from pathlib import Path
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 
-from .contracts import build_change_event, mark_demo_bypass
+from .contracts import attach_intent_result, build_change_event, mark_demo_bypass
+from .pipeline import LiveIntentPipeline
 from .settings import load_local_environment
 from .transports import KafkaPublisher
 
@@ -49,13 +50,17 @@ def main() -> None:
     document = read_cosmos_document(container_name, document_id)
     event = mark_demo_bypass(build_change_event(container_name, document))
 
-    KafkaPublisher().publish(event, document_id)
+    result = LiveIntentPipeline().process(event)
+    output_event = attach_intent_result(event, result)
+    KafkaPublisher().publish(output_event, document_id)
     output = Path("output/last_bypass_event.json")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(event, indent=2), encoding="utf-8")
+    output.write_text(json.dumps(output_event, indent=2), encoding="utf-8")
 
     print(f"Replayed Cosmos document: {document_id}")
-    print(f"Published Kafka event: {event['id']}")
+    print(f"SLM intent: {result['intent']}")
+    print(f"CSV saved: {result['saved']}")
+    print(f"Published Kafka event: {output_event['id']}")
     print("Bypassed: cosmos_change_feed, local_azure_function")
 
 

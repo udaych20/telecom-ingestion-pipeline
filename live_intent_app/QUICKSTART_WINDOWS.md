@@ -10,8 +10,8 @@ Mode 1 or Mode 2.
 Use this mode first. It verifies the actual integration path:
 
 ```text
-Cosmos test insert -> change feed -> local Azure Function -> local Kafka
-  -> Cloud Foundry model -> output/live_intent.csv
+Cosmos test insert -> change feed -> local Azure Function
+  -> Cloud Foundry model -> output/live_intent.csv -> local Kafka
 ```
 
 Nothing is bypassed. This mode requires the Cosmos change feed, Azure Functions
@@ -23,12 +23,13 @@ Use this only when the Cosmos insert works but the change feed or local Azure
 Function cannot run because of environment or access limitations:
 
 ```text
-Cosmos test insert -> read the same Cosmos record -> local Kafka
-  -> Cloud Foundry model -> output/live_intent.csv
+Cosmos test insert -> read the same Cosmos record
+  -> Cloud Foundry model -> output/live_intent.csv -> local Kafka
 ```
 
-Mode 2 bypasses only `cosmos_change_feed` and `local_azure_function`. It does
-not mock Kafka, Cloud Foundry inference, or CSV output.
+Mode 2 bypasses only `cosmos_change_feed` and `local_azure_function`. It calls
+the real Cloud Foundry model, writes the real CSV, and then publishes the
+enriched result to Kafka.
 
 Run application commands from:
 
@@ -39,10 +40,10 @@ cd D:\git\telecom-ingestion-pipeline\live_intent_app
 After the common setup, the automated runners are:
 
 ```powershell
-# Full flow; start Kafka, kafka_worker, and func first.
+# Full flow; start Kafka and func first.
 .\scripts\run-demo.ps1 -Mode Live
 
-# Targeted bypass; start Kafka and kafka_worker first.
+# Targeted bypass; start Kafka first.
 .\scripts\run-demo.ps1 -Mode Demo
 ```
 
@@ -82,7 +83,7 @@ Copy-Item .\.env.example .\.env
 Copy-Item .\local.settings.example.json .\local.settings.json
 ```
 
-Update `.env` for the insert script, Kafka worker, model, and CSV:
+Update `.env` for the insert script, model, CSV, and Kafka publisher:
 
 ```dotenv
 COSMOS_CONNECTION__accountEndpoint=https://YOUR-ACCOUNT.documents.azure.com:443/
@@ -91,7 +92,6 @@ COSMOS_CHAT_CONTAINER=chat-history-uat
 
 KAFKA_BOOTSTRAP_SERVERS=localhost:9092
 KAFKA_TOPIC=cosmos-changes
-KAFKA_CONSUMER_GROUP=slm-inference
 KAFKA_SECURITY_PROTOCOL=PLAINTEXT
 
 MODEL_ENDPOINT=https://YOUR-CLOUD-FOUNDRY-ROUTE.example.com/v1
@@ -120,6 +120,12 @@ Update `local.settings.json` for the local Functions host:
     "COSMOS_TOOLS_LEASE": "leases-live-tools",
     "COSMOS_FEEDBACK_CONTAINER": "chat-feedback",
     "COSMOS_FEEDBACK_LEASE": "leases-live-feedback",
+    "MODEL_ENDPOINT": "https://YOUR-CLOUD-FOUNDRY-ROUTE.example.com/v1",
+    "MODEL_DEPLOYMENT": "YOUR-SLM",
+    "MODEL_API_KEY": "YOUR-MODEL-KEY",
+    "MODEL_API_KEY_HEADER": "Authorization",
+    "MODEL_TIMEOUT_SECONDS": "30",
+    "CSV_OUTPUT": "output/live_intent.csv",
     "KAFKA_BOOTSTRAP_SERVERS": "localhost:9092",
     "KAFKA_TOPIC": "cosmos-changes",
     "KAFKA_SECURITY_PROTOCOL": "PLAINTEXT"
@@ -183,21 +189,14 @@ cd D:\git\telecom-ingestion-pipeline\live_intent_app
 .\scripts\start-kafka.ps1
 ```
 
-Terminal 2 — inference worker:
-
-```powershell
-cd D:\git\telecom-ingestion-pipeline\live_intent_app
-python -m live_intent_app.kafka_worker
-```
-
-Terminal 3 — Cosmos change-feed listener:
+Terminal 2 — Cosmos change-feed listener, inference, CSV, and Kafka publisher:
 
 ```powershell
 cd D:\git\telecom-ingestion-pipeline\live_intent_app
 func start
 ```
 
-Wait until all Cosmos triggers are listed without errors. Then use Terminal 4 to
+Wait until all Cosmos triggers are listed without errors. Then use Terminal 3 to
 insert a new Cosmos document:
 
 ```powershell
@@ -211,8 +210,8 @@ The script creates a unique document ID on every run.
 
 ### Verify Mode 1
 
-The Function terminal should report a change-feed invocation. The Kafka worker
-should report the inferred event. Check the CSV:
+The Function terminal should report the change-feed invocation, SLM result,
+CSV write, and Kafka publication.
 
 Run the verifier after allowing the Function and worker to process the event:
 
@@ -220,8 +219,8 @@ Run the verifier after allowing the Function and worker to process the event:
 python -m live_intent_app.verify_demo --mode live
 ```
 
-It reports separate results for the Cosmos insert, change feed, local Function
-publication, Kafka topic, and SLM-to-CSV processing. You can also inspect:
+It reports separate results for the Cosmos insert, change feed, local Function,
+SLM inference, CSV, and final Kafka publication. You can also inspect:
 
 ```powershell
 Get-Content .\output\change_feed_audit.jsonl
@@ -233,22 +232,23 @@ Expected Mode 1 result:
 ```text
 PASS         Cosmos insert
 PASS         Cosmos change feed
-PASS         Local Azure Function -> Kafka
-PASS         Kafka topic
-PASS         SLM inference -> intent CSV
+PASS         Local Azure Function
+PASS         Cloud Foundry SLM
+PASS         Intent CSV
+PASS         Kafka result topic
 ```
 
 ## Mode 2 — run the demo bypass
 
 Use the bypass only when the Cosmos insert succeeded but the verifier cannot
 confirm the change feed or local Azure Function. It reads the same inserted
-document back from Cosmos and publishes the canonical event directly to Kafka:
+document back from Cosmos, calls the SLM, writes CSV, and publishes the enriched
+result to Kafka:
 
-Kafka and the inference worker must still be running. The local Functions host
-is not required for this mode.
+Kafka must be running. The local Functions host is not required for this mode.
 
-If you are starting directly with Mode 2, use separate terminals to start Kafka
-and the inference worker as shown in Mode 1. Then insert a new Cosmos record:
+If you are starting directly with Mode 2, start Kafka as shown in Mode 1. Then
+insert a new Cosmos record:
 
 ```powershell
 python -m live_intent_app.insert_cosmos_test_document `
@@ -256,7 +256,7 @@ python -m live_intent_app.insert_cosmos_test_document `
     --message "Please check the status of my mobile service"
 ```
 
-After the insert succeeds, replay that exact record to Kafka:
+After the insert succeeds, process that exact record and publish its result:
 
 ```powershell
 python -m live_intent_app.replay_cosmos_to_kafka
@@ -276,17 +276,18 @@ Run the verifier:
 python -m live_intent_app.verify_demo --mode demo
 ```
 
-The Cosmos change-feed and Function stages remain
-`NOT VERIFIED`; Kafka and the SLM intent CSV can pass. This is intentional.
+The Cosmos change-feed and Function stages remain `NOT VERIFIED`; the SLM,
+intent CSV, and final Kafka publication can pass. This is intentional.
 
 Expected Mode 2 result:
 
 ```text
 PASS         Cosmos insert
 NOT VERIFIED Cosmos change feed
-NOT VERIFIED Local Azure Function -> Kafka
-PASS         Kafka topic
-PASS         SLM inference -> intent CSV
+NOT VERIFIED Local Azure Function
+PASS         Cloud Foundry SLM
+PASS         Intent CSV
+PASS         Kafka result topic
 ```
 
 ## Access requirements

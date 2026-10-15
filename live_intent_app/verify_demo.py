@@ -79,24 +79,30 @@ def main() -> None:
     )
 
     print(f"Event ID: {event_id}")
+    csv_found = csv_contains(
+        Path(os.getenv("CSV_OUTPUT", "output/live_intent.csv")), event_id
+    )
+    slm_inferred = "SLM_INFERRED" in stages or csv_found
     results = {
         "Cosmos insert": True,
         "Cosmos change feed": "CHANGE_FEED_RECEIVED" in stages,
-        "Local Azure Function -> Kafka": "KAFKA_PUBLISHED" in stages,
-        "Kafka topic": kafka_contains(event_id, args.timeout),
-        "SLM inference -> intent CSV": csv_contains(
-            Path(os.getenv("CSV_OUTPUT", "output/live_intent.csv")), event_id
-        ),
+        "Local Azure Function": "SLM_INFERRED" in stages,
+        "Cloud Foundry SLM": slm_inferred,
+        "Intent CSV": csv_found,
+        "Kafka result topic": kafka_contains(event_id, args.timeout),
     }
     for stage, passed in results.items():
         detail = str(receipt["document"].get("id", "")) if stage == "Cosmos insert" else ""
         print_status(stage, passed, detail)
 
-    required_stages = {"Cosmos insert", "Kafka topic", "SLM inference -> intent CSV"}
+    required_stages = {
+        "Cosmos insert",
+        "Cloud Foundry SLM",
+        "Intent CSV",
+        "Kafka result topic",
+    }
     if args.mode == "live":
-        required_stages.update(
-            {"Cosmos change feed", "Local Azure Function -> Kafka"}
-        )
+        required_stages.update({"Cosmos change feed", "Local Azure Function"})
     if args.mode and not all(results[stage] for stage in required_stages):
         raise SystemExit(1)
 
