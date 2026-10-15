@@ -20,8 +20,16 @@ INTENTS = {
 SYSTEM_PROMPT = (
     "Classify the telecom customer request as ticket, modify, rca, query, "
     "general, or clarification_needed. Return JSON with intent, confidence, "
-    "and reason."
+    "and reason. confidence must be a number from 0.0 to 1.0."
 )
+CONFIDENCE_LABELS = {
+    "very low": 0.1,
+    "low": 0.3,
+    "medium": 0.6,
+    "moderate": 0.6,
+    "high": 0.9,
+    "very high": 0.95,
+}
 
 
 @dataclass(frozen=True)
@@ -89,13 +97,27 @@ class FoundryModel:
         intent = str(result.get("intent", "")).strip().lower()
         if intent not in INTENTS:
             raise ValueError(f"Model returned unsupported intent: {intent}")
-        confidence = max(0.0, min(1.0, float(result.get("confidence", 0))))
+        confidence = normalize_confidence(result.get("confidence", 0))
         return Inference(
             intent,
             confidence,
             str(result.get("reason", "")),
             self.deployment,
         )
+
+
+def normalize_confidence(value: Any) -> float:
+    """Normalize model confidence expressed as a number, percentage, or label."""
+    if isinstance(value, str):
+        normalized = value.strip().lower().replace("_", "-").replace("-", " ")
+        if normalized in CONFIDENCE_LABELS:
+            return CONFIDENCE_LABELS[normalized]
+        if normalized.endswith("%"):
+            value = float(normalized[:-1]) / 100
+        else:
+            value = float(normalized)
+    confidence = float(value)
+    return max(0.0, min(1.0, confidence))
 
 
 class AzureOpenAIModel(FoundryModel):

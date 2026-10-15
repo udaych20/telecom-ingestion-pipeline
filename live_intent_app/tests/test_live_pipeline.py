@@ -12,7 +12,12 @@ from live_intent_app.contracts import (
     build_change_event,
     mark_demo_bypass,
 )
-from live_intent_app.inference import AzureOpenAIModel, Inference, configured_model
+from live_intent_app.inference import (
+    AzureOpenAIModel,
+    Inference,
+    configured_model,
+    normalize_confidence,
+)
 from live_intent_app.insert_cosmos_test_document import build_document
 from live_intent_app.insert_cosmos_test_document import main as insert_demo_main
 from live_intent_app.pipeline import LiveIntentPipeline, LocalCsvSink
@@ -25,6 +30,13 @@ class TestModel:
 
 
 class LivePipelineTests(unittest.TestCase):
+    def test_confidence_accepts_numeric_percent_and_labels(self):
+        self.assertEqual(normalize_confidence(0.82), 0.82)
+        self.assertEqual(normalize_confidence("82%"), 0.82)
+        self.assertEqual(normalize_confidence("high"), 0.9)
+        self.assertEqual(normalize_confidence("medium"), 0.6)
+        self.assertEqual(normalize_confidence("low"), 0.3)
+
     @patch("live_intent_app.insert_cosmos_test_document.insert_document")
     def test_backup_flag_skips_cosmos_insertion(self, insert):
         with patch.dict(os.environ, {
