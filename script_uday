@@ -1,5 +1,6 @@
-.\scripts\grant-cosmos-insert-access.ps1 `
-  -ResourceGroup "<cosmos-resource-group>" `
-  -AccountName "nora-copy-db-stream-test-westus2" `
-  -Database "nora-copy-db-stream-test" `
-  -Container "leases-live-chat"
+az cosmosdb sql role assignment create `
+  --resource-group $resourceGroup `
+  --account-name $accountName `
+  --role-definition-id "$accountId/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002" `
+  --principal-id $principalId `
+  --scope "/dbs/$databaseName/colls/$leaseContainer"
