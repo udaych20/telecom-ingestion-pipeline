@@ -63,8 +63,12 @@ Keep it running. Create the topic once in another terminal:
 Terminal 2:
 
 ```powershell
-func start
+.\scripts\verify-and-start-function.ps1
 ```
+
+The script creates and activates `.venv`, installs `requirements.txt`, verifies
+the required Python imports, displays the Core Tools version, and starts the
+Function host from the directory containing `host.json`.
 
 Wait until these triggers are listed without errors:
 
