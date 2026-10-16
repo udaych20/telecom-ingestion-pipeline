@@ -83,13 +83,10 @@ The script creates and activates `.venv`, installs `requirements.txt`, verifies
 the required Python imports, displays the Core Tools version, and starts the
 Function host from the directory containing `host.json`.
 
-Wait until these triggers are listed without errors:
+Wait until this trigger is listed without errors:
 
 ```text
 chat_changes
-context_changes
-tool_changes
-feedback_changes
 ```
 
 ## 4. Insert the Cosmos record separately
@@ -152,7 +149,7 @@ The Function host does not read binding connection settings from `.env`.
 `AzureWebJobsStorage` must be a valid, reachable Storage connection string.
 Keep `local.settings.json` local because it can contain secrets.
 
-The identity running the Function requires Cosmos data access to every source
-and lease container. For this four-trigger flow, grant the Cosmos DB Built-in
-Data Contributor role at database scope (`/dbs/YOUR-DATABASE`) and ensure the
-configured lease containers already exist.
+The identity running the Function requires Cosmos data access to
+`chat-history-uat` and its configured lease container. Grant the Cosmos DB
+Built-in Data Contributor role at database scope (`/dbs/YOUR-DATABASE`) and
+ensure the chat lease container already exists.

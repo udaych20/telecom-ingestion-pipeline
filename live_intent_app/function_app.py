@@ -126,36 +126,3 @@ def cosmos_trigger(
 def chat_changes(documents: func.DocumentList) -> None:
     container = os.getenv("COSMOS_CHAT_CONTAINER", "chat-history-uat")
     publish_changes(documents, container)
-
-
-@cosmos_trigger(
-    "COSMOS_CONTEXT_CONTAINER",
-    "context-history-uat",
-    "COSMOS_CONTEXT_LEASE",
-    "leases-live-context",
-)
-def context_changes(documents: func.DocumentList) -> None:
-    container = os.getenv("COSMOS_CONTEXT_CONTAINER", "context-history-uat")
-    publish_changes(documents, container)
-
-
-@cosmos_trigger(
-    "COSMOS_TOOLS_CONTAINER",
-    "context-history-all-tools",
-    "COSMOS_TOOLS_LEASE",
-    "leases-live-tools",
-)
-def tool_changes(documents: func.DocumentList) -> None:
-    container = os.getenv("COSMOS_TOOLS_CONTAINER", "context-history-all-tools")
-    publish_changes(documents, container)
-
-
-@cosmos_trigger(
-    "COSMOS_FEEDBACK_CONTAINER",
-    "chat-feedback",
-    "COSMOS_FEEDBACK_LEASE",
-    "leases-live-feedback",
-)
-def feedback_changes(documents: func.DocumentList) -> None:
-    container = os.getenv("COSMOS_FEEDBACK_CONTAINER", "chat-feedback")
-    publish_changes(documents, container)
