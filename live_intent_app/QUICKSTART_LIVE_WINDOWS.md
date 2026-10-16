@@ -119,3 +119,27 @@ Get-Content .\output\live_intent.csv
 
 If `func start` reports `WorkerConfig for runtime: python not found`, repair the
 64-bit Azure Functions Core Tools installation or use the separate demo guide.
+
+If `func start` reports that `COSMOS_CONNECTION` does not exist, confirm that
+`local.settings.json` exists and contains these Function host settings:
+
+```json
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "PASTE-AZURE-STORAGE-CONNECTION-STRING-HERE",
+    "COSMOS_CONNECTION__accountEndpoint": "https://YOUR-ACCOUNT.documents.azure.com:443/",
+    "COSMOS_DATABASE": "YOUR-DATABASE"
+  }
+}
+```
+
+The Function host does not read binding connection settings from `.env`.
+`AzureWebJobsStorage` must be a valid, reachable Storage connection string.
+Keep `local.settings.json` local because it can contain secrets.
+
+The identity running the Function requires Cosmos data access to every source
+and lease container. For this four-trigger flow, grant the Cosmos DB Built-in
+Data Contributor role at database scope (`/dbs/YOUR-DATABASE`) and ensure the
+configured lease containers already exist.
