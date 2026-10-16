@@ -37,6 +37,19 @@ Configure `.env` with the real Cosmos, Cloud Foundry, CSV, and Kafka values.
 Configure `local.settings.json` with the same application values and a real
 Azure Storage connection string in `AzureWebJobsStorage`.
 
+To retrieve the Storage connection string in the format expected by the
+Function host:
+
+```powershell
+.\scripts\get-function-storage-setting.ps1 `
+    -ResourceGroup "<storage-resource-group>" `
+    -StorageAccount "<storage-account-name>"
+```
+
+Copy the printed `AzureWebJobsStorage` entry into the `Values` section of
+`local.settings.json`. Do not commit that file because the connection string
+contains an account key.
+
 If the Cosmos source/lease containers or Function storage account are missing:
 
 ```powershell
