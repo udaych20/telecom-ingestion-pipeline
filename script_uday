@@ -4,3 +4,8 @@ az cosmosdb sql role assignment create `
   --role-definition-id "$accountId/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002" `
   --principal-id $principalId `
   --scope "/dbs/$databaseName/colls/$leaseContainer"
+
+
+az functionapp list `
+  --query "[].{Name:name, ResourceGroup:resourceGroup, State:state, Host:defaultHostName}" `
+  --output table
