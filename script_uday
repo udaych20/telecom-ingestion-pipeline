@@ -1,0 +1,5 @@
+.\scripts\grant-cosmos-insert-access.ps1 `
+  -ResourceGroup "<cosmos-resource-group>" `
+  -AccountName "nora-copy-db-stream-test-westus2" `
+  -Database "nora-copy-db-stream-test" `
+  -Container "leases-live-chat"
