@@ -29,7 +29,14 @@ from live_intent_app.transports import KafkaPublisher
 
 class TestModel:
     def infer(self, text):
-        return Inference("query", 0.91, "Test prediction", "test-model")
+        return Inference(
+            "ticket",
+            "ACTIVATION",
+            "data working / data / working",
+            0.91,
+            "Test prediction",
+            "test-model",
+        )
 
 
 class LivePipelineTests(unittest.TestCase):
@@ -122,7 +129,11 @@ class LivePipelineTests(unittest.TestCase):
     def test_azure_openai_slm_uses_sdk_client_and_deployment(self, client_type):
         response = client_type.return_value.chat.completions.create.return_value
         response.choices[0].message.content = json.dumps({
-            "intent": "query", "confidence": 0.93, "reason": "status"
+            "Source_Intent-L1": "ticket",
+            "Intent_L2": "ACTIVATION",
+            "Likely_Theme_L4": "data working / data / working",
+            "confidence": 0.93,
+            "reason": "status",
         })
         with patch.dict(os.environ, {
             "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com/",
@@ -142,7 +153,12 @@ class LivePipelineTests(unittest.TestCase):
         )
         call = client_type.return_value.chat.completions.create.call_args.kwargs
         self.assertEqual(call["model"], "demo slm")
-        self.assertEqual(prediction.intent, "query")
+        self.assertEqual(prediction.source_intent_l1, "ticket")
+        self.assertEqual(prediction.intent_l2, "ACTIVATION")
+        self.assertEqual(
+            prediction.likely_theme_l4,
+            "data working / data / working",
+        )
 
     def test_document_is_inferred_and_written_once(self):
         document = {
@@ -164,7 +180,12 @@ class LivePipelineTests(unittest.TestCase):
             pipeline = LiveIntentPipeline(TestModel(), LocalCsvSink(path))
             first = pipeline.process(event)
             second = pipeline.process(event)
-            self.assertEqual(first["intent"], "query")
+            self.assertEqual(first["source_intent_l1"], "ticket")
+            self.assertEqual(first["intent_l2"], "ACTIVATION")
+            self.assertEqual(
+                first["likely_theme_l4"],
+                "data working / data / working",
+            )
             self.assertTrue(first["saved"])
             self.assertFalse(second["saved"])
             with path.open(encoding="utf-8-sig", newline="") as handle:
@@ -177,6 +198,32 @@ class LivePipelineTests(unittest.TestCase):
         one = build_change_event("chat", {"id": "1", "_etag": "a"})
         two = build_change_event("chat", {"id": "1", "_etag": "b"})
         self.assertNotEqual(one["id"], two["id"])
+
+    def test_legacy_csv_is_migrated_to_hierarchical_columns(self):
+        document = {
+            "id": "doc-2",
+            "_etag": "v1",
+            "messages": [{"type": "user", "data": {"content": "activate data"}}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.csv"
+            path.write_text(
+                "event_id,user_text,intent,confidence\nold,status,query,0.8\n",
+                encoding="utf-8",
+            )
+            LiveIntentPipeline(TestModel(), LocalCsvSink(path)).process(
+                build_change_event("chat", document)
+            )
+            with path.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+
+        self.assertEqual(rows[0]["source_intent_l1"], "query")
+        self.assertEqual(rows[1]["source_intent_l1"], "ticket")
+        self.assertEqual(rows[1]["intent_l2"], "ACTIVATION")
+        self.assertEqual(
+            rows[1]["likely_theme_l4"],
+            "data working / data / working",
+        )
 
     def test_cosmos_test_document_matches_expected_shape(self):
         document = build_document("doc-1", "cid-1", "Check service status")
@@ -203,7 +250,9 @@ class LivePipelineTests(unittest.TestCase):
         result = {
             "event_id": event["id"],
             "user_text": "Check my service status",
-            "intent": "query",
+            "source_intent_l1": "ticket",
+            "intent_l2": "ACTIVATION",
+            "likely_theme_l4": "data working / data / working",
             "confidence": "0.9100",
             "reason": "Test prediction",
             "model": "test-model",
@@ -213,7 +262,14 @@ class LivePipelineTests(unittest.TestCase):
         output = attach_intent_result(event, result)
 
         self.assertEqual(output["type"], "com.telecom.user.intent.inferred")
-        self.assertEqual(output["data"]["intent_result"]["intent"], "query")
+        self.assertEqual(
+            output["data"]["intent_result"]["ontology"],
+            {
+                "Source_Intent-L1": "ticket",
+                "Intent_L2": "ACTIVATION",
+                "Likely_Theme_L4": "data working / data / working",
+            },
+        )
         self.assertEqual(
             output["data"]["message"],
             {"type": "user", "data": {"content": "Check my service status"}},
@@ -230,7 +286,11 @@ class LivePipelineTests(unittest.TestCase):
         pipeline_type.return_value.process.side_effect = lambda event: (
             calls.append("csv")
             or {
-                "event_id": event["id"], "intent": "query", "confidence": "0.9100",
+                "event_id": event["id"],
+                "source_intent_l1": "ticket",
+                "intent_l2": "ACTIVATION",
+                "likely_theme_l4": "data working / data / working",
+                "confidence": "0.9100",
                 "reason": "status request", "model": "slm", "saved": True,
                 "user_text": "status",
             }
@@ -244,9 +304,12 @@ class LivePipelineTests(unittest.TestCase):
 
         self.assertEqual(calls, ["csv", "kafka"])
         publisher_type.return_value.publish.assert_called_once_with(
-            "status", event["id"]
+            event, event["id"]
         )
-        self.assertEqual(event["data"]["intent_result"]["intent"], "query")
+        self.assertEqual(
+            event["data"]["intent_result"]["ontology"]["Source_Intent-L1"],
+            "ticket",
+        )
         self.assertEqual(event["data"]["message"]["data"]["content"], "status")
         self.assertTrue(event["data"]["csv_saved"])
 

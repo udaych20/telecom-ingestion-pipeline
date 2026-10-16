@@ -38,6 +38,8 @@ Choose the appropriate standalone guide:
 - `scripts/run-demo-flow.ps1` runs SLM, CSV, and Kafka from either the inserted
   Cosmos batch (`false`) or directly from JSON (`true`).
 
-The model must return JSON containing `intent`, `confidence`, and `reason`.
-Allowed intents are `ticket`, `modify`, `rca`, `query`, `general`, and
-`clarification_needed`.
+The model must return hierarchical JSON containing `Source_Intent-L1`,
+`Intent_L2`, and `Likely_Theme_L4`. It can also return `confidence` and
+`reason`; omitted optional values are saved as `0.0` and an empty string. The
+three hierarchy levels, confidence, reason, model, and masked user content are
+saved to CSV and published as structured JSON to Kafka.

@@ -22,7 +22,9 @@ CSV_FIELDS = (
     "source_id",
     "conversation_id",
     "user_text",
-    "intent",
+    "source_intent_l1",
+    "intent_l2",
+    "likely_theme_l4",
     "confidence",
     "reason",
     "model",
@@ -56,6 +58,7 @@ class LocalCsvSink:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
         with self._lock:
+            self._migrate_legacy_schema()
             seen = self._saved_event_ids()
             if row["event_id"] in seen:
                 return False
@@ -75,6 +78,32 @@ class LocalCsvSink:
                 handle.write(str(row["event_id"]) + "\n")
 
             return True
+
+    def _migrate_legacy_schema(self) -> None:
+        """Upgrade an existing flat-intent CSV before appending hierarchy rows."""
+        if not self.path.exists() or self.path.stat().st_size == 0:
+            return
+        with self.path.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if tuple(reader.fieldnames or ()) == CSV_FIELDS:
+                return
+            rows = list(reader)
+
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        with temporary.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
+            writer.writeheader()
+            for existing in rows:
+                migrated = {
+                    field: existing.get(field, "")
+                    for field in CSV_FIELDS
+                }
+                migrated["source_intent_l1"] = (
+                    migrated["source_intent_l1"]
+                    or existing.get("intent", "")
+                )
+                writer.writerow(migrated)
+        temporary.replace(self.path)
 
     def _saved_event_ids(self) -> set[str]:
         if not self.ledger.exists():
@@ -113,7 +142,10 @@ class LiveIntentPipeline:
             "source_id": source_id,
             "conversation_id": conversation,
             "user_text": text,
-            "intent": prediction.intent,
+            "source_intent_l1": prediction.source_intent_l1,
+            "intent_l2": prediction.intent_l2,
+            "likely_theme_l4": prediction.likely_theme_l4,
+            "intent": prediction.source_intent_l1,
             "confidence": f"{prediction.confidence:.4f}",
             "reason": prediction.reason,
             "model": prediction.model,

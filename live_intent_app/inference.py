@@ -9,18 +9,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-INTENTS = {
-    "ticket",
-    "modify",
-    "rca",
-    "query",
-    "general",
-    "clarification_needed",
-}
 SYSTEM_PROMPT = (
-    "Classify the telecom customer request as ticket, modify, rca, query, "
-    "general, or clarification_needed. Return JSON with intent, confidence, "
-    "and reason. confidence must be a number from 0.0 to 1.0."
+    "Classify the telecom message into the hierarchical intent taxonomy. "
+    "Return only one valid JSON object with fields Source_Intent-L1, "
+    "Intent_L2, Likely_Theme_L4, confidence, and reason. confidence must be "
+    "a number from 0.0 to 1.0."
 )
 CONFIDENCE_LABELS = {
     "very low": 0.1,
@@ -34,10 +27,17 @@ CONFIDENCE_LABELS = {
 
 @dataclass(frozen=True)
 class Inference:
-    intent: str
+    source_intent_l1: str
+    intent_l2: str
+    likely_theme_l4: str
     confidence: float
     reason: str
     model: str
+
+    @property
+    def intent(self) -> str:
+        """Keep the previous L1 intent accessor for existing callers."""
+        return self.source_intent_l1
 
 
 class IntentModel(Protocol):
@@ -94,12 +94,30 @@ class FoundryModel:
 
     def _parse_content(self, content: str) -> Inference:
         result = json.loads(content)
-        intent = str(result.get("intent", "")).strip().lower()
-        if intent not in INTENTS:
-            raise ValueError(f"Model returned unsupported intent: {intent}")
+        source_intent_l1 = str(
+            result.get("Source_Intent-L1")
+            or result.get("source_intent_l1")
+            or result.get("intent")
+            or ""
+        ).strip()
+        intent_l2 = str(
+            result.get("Intent_L2") or result.get("intent_l2") or ""
+        ).strip()
+        likely_theme_l4 = str(
+            result.get("Likely_Theme_L4")
+            or result.get("likely_theme_l4")
+            or ""
+        ).strip()
+        if not source_intent_l1 or not intent_l2 or not likely_theme_l4:
+            raise ValueError(
+                "Model response must include Source_Intent-L1, Intent_L2, "
+                "and Likely_Theme_L4"
+            )
         confidence = normalize_confidence(result.get("confidence", 0))
         return Inference(
-            intent,
+            source_intent_l1,
+            intent_l2,
+            likely_theme_l4,
             confidence,
             str(result.get("reason", "")),
             self.deployment,

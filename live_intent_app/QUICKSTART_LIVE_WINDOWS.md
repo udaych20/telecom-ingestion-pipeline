@@ -89,6 +89,40 @@ Wait until this trigger is listed without errors:
 chat_changes
 ```
 
+For each changed chat document, the Function log shows the demo stages in this
+order:
+
+```text
+CHANGE_FEED_DETECTED container=chat-history-uat ...
+SLM_INFERENCE_SUCCESS ... L1=ticket L2=ACTIVATION L4=data working / data / working confidence=0.9000 ...
+CSV_SAVE_SUCCESS ...
+KAFKA_PUBLISH_SUCCESS ...
+```
+
+Kafka receives a structured JSON event. Its inference section has this shape:
+
+```json
+{
+  "data": {
+    "message": {
+      "type": "user",
+      "data": {"content": "masked user message"}
+    },
+    "intent_result": {
+      "ontology": {
+        "Source_Intent-L1": "ticket",
+        "Intent_L2": "ACTIVATION",
+        "Likely_Theme_L4": "data working / data / working"
+      },
+      "confidence": "0.9000",
+      "reason": "model-provided reason",
+      "model": "configured deployment"
+    },
+    "csv_saved": true
+  }
+}
+```
+
 ## 4. Insert the Cosmos record separately
 
 Terminal 3:

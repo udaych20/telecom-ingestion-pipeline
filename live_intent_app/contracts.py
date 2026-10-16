@@ -51,7 +51,7 @@ def attach_intent_result(
     event: dict[str, Any],
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build a minimal Kafka event containing only user content and intent."""
+    """Build the ontology-enriched Kafka event."""
     output = {
         key: event[key]
         for key in ("specversion", "id", "source", "time", "datacontenttype")
@@ -64,9 +64,14 @@ def attach_intent_result(
             "data": {"content": str(result.get("user_text", ""))},
         },
         "intent_result": {
-            key: result[key]
-            for key in ("intent", "confidence", "reason", "model")
-            if key in result
+            "ontology": {
+                "Source_Intent-L1": str(result.get("source_intent_l1", "")),
+                "Intent_L2": str(result.get("intent_l2", "")),
+                "Likely_Theme_L4": str(result.get("likely_theme_l4", "")),
+            },
+            "confidence": result.get("confidence", "0.0000"),
+            "reason": str(result.get("reason", "")),
+            "model": str(result.get("model", "")),
         },
         "csv_saved": bool(result.get("saved")),
     }

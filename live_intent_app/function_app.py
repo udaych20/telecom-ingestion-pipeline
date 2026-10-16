@@ -53,28 +53,39 @@ def publish_changes(documents: func.DocumentList, container: str) -> None:
         )
         write_demo_audit("CHANGE_FEED_RECEIVED", event, partition_key)
         LOGGER.info(
-            "CHANGE_FEED_RECEIVED event_id=%s document_id=%s trace_id=%s",
-            event["id"],
+            "CHANGE_FEED_DETECTED container=%s document_id=%s event_id=%s trace_id=%s",
+            container,
             document.get("id", ""),
+            event["id"],
             document.get("_demo_trace_id", ""),
         )
         result = pipeline().process(event)
         write_demo_audit("SLM_INFERRED", event, partition_key)
         write_demo_audit("CSV_WRITTEN", event, partition_key)
         LOGGER.info(
-            "SLM_INFERRED event_id=%s intent=%s csv_saved=%s",
+            "SLM_INFERENCE_SUCCESS event_id=%s L1=%s L2=%s L4=%s confidence=%s model=%s",
             event["id"],
-            result["intent"],
+            result["source_intent_l1"],
+            result["intent_l2"],
+            result["likely_theme_l4"],
+            result["confidence"],
+            result["model"],
+        )
+        LOGGER.info(
+            "CSV_SAVE_SUCCESS event_id=%s saved=%s path=%s",
+            event["id"],
             result["saved"],
+            os.getenv("CSV_OUTPUT", "output/live_intent.csv"),
         )
         output_event = attach_intent_result(event, result)
-        publisher().publish(result["user_text"], str(event["id"]))
+        publisher().publish(output_event, str(event["id"]))
         write_demo_audit("KAFKA_PUBLISHED", event, partition_key)
         LOGGER.info(
-            "KAFKA_PUBLISHED event_id=%s topic=%s partition_key=%s",
+            "KAFKA_PUBLISH_SUCCESS event_id=%s topic=%s partition_key=%s ontology=%s",
             output_event["id"],
             os.getenv("KAFKA_TOPIC", "cosmos-changes"),
             output_event["id"],
+            json.dumps(output_event["data"]["intent_result"], sort_keys=True),
         )
 
 
